@@ -1,3 +1,4 @@
+// BASE is captured at module load — set NEXT_PUBLIC_ASSET_BASE before importing in tests.
 const BASE = (process.env.NEXT_PUBLIC_ASSET_BASE || '').replace(/\/+$/, '');
 
 function encodePath(s: string): string {

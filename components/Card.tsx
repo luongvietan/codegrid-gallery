@@ -1,18 +1,32 @@
 'use client';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Project } from '@/lib/types';
 import { assetUrl } from '@/lib/assets';
 
 const TYPE_LABEL: Record<string, string> = { html: 'HTML', nextjs: 'Next.js', react: 'React' };
 
 export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) => void }) {
+  const cardRef = useRef<HTMLDivElement>(null);
   const vidRef = useRef<HTMLVideoElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const playing = useRef(false);
+  const [visible, setVisible] = useState(false);
 
   const thumbSrc = p.thumbnail ? assetUrl(p.folder, p.thumbnail) : '';
   const vidSrc = p.video ? assetUrl(p.folder, p.video) : '';
   const meta = [p.date, p.author].filter(Boolean).join(' · ');
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el || visible) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { setVisible(true); io.disconnect(); break; }
+      }
+    }, { rootMargin: '400px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
 
   function enter() {
     if (!p.video) return;
@@ -31,14 +45,16 @@ export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) =
     if (v) { (v.closest('.card') as HTMLElement)?.classList.remove('playing'); v.pause(); try { v.currentTime = 0; } catch {} }
   }
 
+  const showThumb = visible && p.thumbnail;
+
   return (
-    <div className="card" onClick={() => onOpen(p)} onMouseEnter={enter} onMouseLeave={leave}>
+    <div ref={cardRef} className="card" onClick={() => onOpen(p)} onMouseEnter={enter} onMouseLeave={leave}>
       <div
         className={`thumb ${p.thumbnail ? '' : 'placeholder'}`}
-        style={p.thumbnail ? { backgroundImage: `url('${thumbSrc}')` } : undefined}
+        style={showThumb ? { backgroundImage: `url('${thumbSrc}')` } : undefined}
       >
         {p.thumbnail ? '' : 'No preview'}
-        {p.video && (
+        {visible && p.video && (
           <>
             <video
               ref={vidRef}

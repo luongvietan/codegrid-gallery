@@ -48,7 +48,7 @@ export default function PreviewTab({ p, zip, onToast }: {
         <button className="ghost" onClick={() => { if (entry && iframe.current) iframe.current.src = `/__preview__/${encodePath(entry)}`; }}>⟳</button>
       </div>
       <div className="iframe-wrap">
-        <iframe ref={iframe} title="Preview" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups" />
+        <iframe id="preview" ref={iframe} title="Preview" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups" />
       </div>
     </section>
   );

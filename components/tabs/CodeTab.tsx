@@ -6,7 +6,13 @@ import { ext } from '@/lib/format';
 const TEXT_EXT = new Set(['html','htm','css','js','mjs','cjs','jsx','ts','tsx','json','md','txt','svg','xml','yml','yaml','gitignore','env','config','map','rscinfo','sample','old']);
 const IMG_EXT = new Set(['png','jpg','jpeg','gif','webp','avif','ico','bmp']);
 
-export default function CodeTab({ zip }: { zip: ExtractedZip | null }) {
+type View =
+  | { kind: 'text'; text: string }
+  | { kind: 'img'; url: string }
+  | { kind: 'binary'; e: string; kb: string }
+  | null;
+
+export default function CodeTab({ zip, onToast }: { zip: ExtractedZip | null; onToast?: (m: string) => void }) {
   const [active, setActive] = useState<string | null>(null);
 
   const groups = useMemo(() => {
@@ -30,21 +36,38 @@ export default function CodeTab({ zip }: { zip: ExtractedZip | null }) {
     setActive(pref);
   }, [zip]);
 
-  function render(name: string | null) {
-    if (!name || !zip) return null;
-    const ab = zip.files.get(name);
+  const view: View = useMemo(() => {
+    if (!active || !zip) return null;
+    const ab = zip.files.get(active);
     if (!ab) return null;
-    const e = ext(name);
+    const e = ext(active);
     if (IMG_EXT.has(e) || e === 'svg') {
       const url = URL.createObjectURL(new Blob([ab], { type: e === 'svg' ? 'image/svg+xml' : 'image/' + e }));
-      return <div style={{ padding: 18, textAlign: 'center' }}><img src={url} style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 8 }} alt={name} /></div>;
+      return { kind: 'img', url };
     }
     if (!TEXT_EXT.has(e)) {
-      return <div className="binary-note">File nhị phân (.{e}) — {(ab.byteLength / 1024).toFixed(1)} KB.</div>;
+      return { kind: 'binary', e, kb: (ab.byteLength / 1024).toFixed(1) };
     }
     let text = new TextDecoder('utf-8').decode(ab);
     if (text.length > 400000) text = text.slice(0, 400000) + '\n\n… (đã cắt bớt)';
-    return <code style={{ whiteSpace: 'pre' }}>{text}</code>;
+    return { kind: 'text', text };
+  }, [active, zip]);
+
+  // Revoke object URLs created for image previews when the file changes/unmounts.
+  useEffect(() => {
+    if (view?.kind !== 'img') return;
+    const url = view.url;
+    return () => URL.revokeObjectURL(url);
+  }, [view]);
+
+  async function copyCode() {
+    if (view?.kind !== 'text') return;
+    try {
+      await navigator.clipboard.writeText(view.text);
+      onToast?.('Đã copy code.');
+    } catch {
+      onToast?.('Không copy được (clipboard bị chặn).');
+    }
   }
 
   return (
@@ -65,8 +88,23 @@ export default function CodeTab({ zip }: { zip: ExtractedZip | null }) {
         ))}
       </aside>
       <div className="codeview">
-        <div className="code-head"><span className="status">{active ?? ''}</span></div>
-        <pre id="code">{render(active)}</pre>
+        <div className="code-head">
+          <span className="status">{active ?? ''}</span>
+          {view?.kind === 'text' && (
+            <button className="ghost" onClick={copyCode} title="Copy toàn bộ file">Copy</button>
+          )}
+        </div>
+        <pre id="code">
+          {view?.kind === 'img' && (
+            <div style={{ padding: 18, textAlign: 'center' }}>
+              <img src={view.url} style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 8 }} alt={active ?? ''} />
+            </div>
+          )}
+          {view?.kind === 'binary' && (
+            <div className="binary-note">File nhị phân (.{view.e}) — {view.kb} KB.</div>
+          )}
+          {view?.kind === 'text' && <code style={{ whiteSpace: 'pre' }}>{view.text}</code>}
+        </pre>
       </div>
     </section>
   );

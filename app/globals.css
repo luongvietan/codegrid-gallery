@@ -91,14 +91,14 @@ body{background:var(--bg);color:var(--txt);font:15px/1.5 ui-sans-serif,system-ui
 
 /* Code pane */
 .pane-code{display:none}
-.pane-code.active{display:grid;grid-template-columns:280px 1fr}
+.pane-code.active{display:grid;grid-template-columns:280px 1fr;grid-template-rows:minmax(0,1fr)}
 .filetree{border-right:1px solid var(--line);overflow:auto;padding:8px;background:var(--panel)}
 .filetree .f{padding:6px 10px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .filetree .f:hover{background:var(--bg2);color:var(--txt)}
 .filetree .f.active{background:var(--accent);color:#0b1020}
 .filetree .dir{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:10px 10px 4px;opacity:.7}
-.codeview{display:flex;flex-direction:column;min-width:0}
+.codeview{display:flex;flex-direction:column;min-width:0;min-height:0}
 .code-head{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
 #code{margin:0;flex:1;overflow:auto;padding:16px 18px;font:13px/1.6 ui-monospace,"Cascadia Code",Consolas,monospace;
   color:#d7dae0;tab-size:2}

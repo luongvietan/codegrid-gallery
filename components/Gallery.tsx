@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { IndexData, Project } from '@/lib/types';
 import { initSW } from '@/lib/sw-client';
 import Filters, { type Filter, type SortKey } from './Filters';
@@ -15,8 +15,12 @@ export default function Gallery({ data }: { data: IndexData }) {
   const [current, setCurrent] = useState<Project | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
-  useEffect(() => { initSW((m) => showToast(m)); }, []);
-  function showToast(m: string) { setToast(m); setTimeout(() => setToast(null), 6000); }
+  const showToast = useCallback((m: string) => {
+    setToast(m);
+    setTimeout(() => setToast(null), 6000);
+  }, []);
+  const closeModal = useCallback(() => setCurrent(null), []);
+  useEffect(() => { initSW(showToast); }, [showToast]);
 
   const counts = data.counts || {};
   const videoCount = data.projects.filter((p) => p.video || p.media?.videos?.length).length;
@@ -60,7 +64,7 @@ export default function Gallery({ data }: { data: IndexData }) {
         {items.length ? items.map((p) => <Card key={p.id} p={p} onOpen={setCurrent} />)
           : <div className="spinner">Không có project nào khớp.</div>}
       </main>
-      {current && <ProjectModal p={current} onClose={() => setCurrent(null)} onToast={showToast} />}
+      {current && <ProjectModal p={current} onClose={closeModal} onToast={showToast} />}
       {toast && <div className="toast">{toast}</div>}
     </>
   );

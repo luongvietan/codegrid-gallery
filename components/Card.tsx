@@ -46,11 +46,22 @@ export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) =
   }
 
   const showThumb = visible && p.thumbnail;
+  const thumbState = p.thumbnail ? (showThumb ? '' : 'loading') : 'placeholder';
 
   return (
-    <div ref={cardRef} className="card" onClick={() => onOpen(p)} onMouseEnter={enter} onMouseLeave={leave}>
+    <div
+      ref={cardRef}
+      className="card"
+      role="button"
+      tabIndex={0}
+      aria-label={`Mở ${p.title}`}
+      onClick={() => onOpen(p)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(p); } }}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+    >
       <div
-        className={`thumb ${p.thumbnail ? '' : 'placeholder'}`}
+        className={`thumb ${thumbState}`}
         style={showThumb ? { backgroundImage: `url('${thumbSrc}')` } : undefined}
       >
         {p.thumbnail ? '' : 'No preview'}

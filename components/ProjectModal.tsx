@@ -59,7 +59,7 @@ export default function ProjectModal({ p, onClose, onToast }: {
           <button className="close" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
-          {err && <div className="spinner">Lỗi: {err}</div>}
+          {err && <div className="spinner no-spin">Lỗi: {err}</div>}
           {!err && !zip && <div className="spinner">Đang tải & giải nén zip…</div>}
           {!err && zip && tab === 'preview' && hasPreview && <PreviewTab p={p} zip={zip} onToast={onToast} />}
           {!err && zip && tab === 'code' && <CodeTab zip={zip} onToast={onToast} />}

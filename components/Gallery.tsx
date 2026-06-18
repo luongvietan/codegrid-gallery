@@ -62,7 +62,7 @@ export default function Gallery({ data }: { data: IndexData }) {
       </div>
       <main className="grid" aria-live="polite">
         {items.length ? items.map((p) => <Card key={p.id} p={p} onOpen={setCurrent} />)
-          : <div className="spinner">Không có project nào khớp.</div>}
+          : <div className="spinner no-spin">Không có project nào khớp.</div>}
       </main>
       {current && <ProjectModal p={current} onClose={closeModal} onToast={showToast} />}
       {toast && <div className="toast">{toast}</div>}

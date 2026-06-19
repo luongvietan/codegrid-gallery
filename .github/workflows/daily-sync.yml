@@ -1,0 +1,38 @@
+name: daily-sync
+on:
+  schedule:
+    - cron: "0 6 * * *"        # 06:00 UTC = 13:00 Vietnam, daily
+  workflow_dispatch: {}         # manual "Run workflow" button
+permissions:
+  contents: write               # commit + push via GITHUB_TOKEN
+concurrency:
+  group: daily-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run unit tests
+        run: node --test scripts/sync-lib.test.mjs
+      - name: Sync new posts
+        id: sync
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CHANNEL_ID: "1048241543477215275"
+          R2_ENDPOINT: "https://c43c4f2af4941428dc86d37bffcb7800.r2.cloudflarestorage.com"
+          R2_BUCKET: "codegrid-gallery"
+        run: node scripts/ci-sync.mjs
+      - name: Commit & push if changed
+        if: steps.sync.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/index.json
+          git commit -m "data: auto-sync new CodeGrid post(s)"
+          git push

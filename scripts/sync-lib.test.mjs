@@ -36,3 +36,11 @@ test('extractAttachments buckets by extension and content_type', () => {
   assert.deepEqual(a.images.map((x) => x.filename), ['thumb.JPG', 'noext']);
   assert.deepEqual(a.videos.map((x) => x.filename), ['clip.mp4']);
 });
+
+test('sanitizeFilename replaces backslash with underscore', () => {
+  assert.equal(sanitizeFilename('a\\b'), 'a_b');
+});
+
+test('extractAttachments returns empty buckets for message with no attachments', () => {
+  assert.deepEqual(extractAttachments({}), { zips: [], images: [], videos: [] });
+});

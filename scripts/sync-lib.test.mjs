@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  sanitizeFilename, folderNameForMessage, extractAttachments,
+  sanitizeFilename, folderNameForMessage, extractAttachments, classify, pickEntryHtml,
 } from './sync-lib.mjs';
 
 test('sanitizeFilename replaces invalid chars and trims', () => {
@@ -43,4 +43,17 @@ test('sanitizeFilename replaces backslash with underscore', () => {
 
 test('extractAttachments returns empty buckets for message with no attachments', () => {
   assert.deepEqual(extractAttachments({}), { zips: [], images: [], videos: [] });
+});
+
+test('classify: next.config => nextjs, package.json => react, else html', () => {
+  assert.equal(classify(['app/next.config.mjs', 'app/package.json']), 'nextjs');
+  assert.equal(classify(['proj/package.json', 'proj/src/x.js']), 'react');
+  assert.equal(classify(['index.html', 'style.css']), 'html');
+  assert.equal(classify(['__MACOSX/package.json', 'index.html']), 'html');
+});
+
+test('pickEntryHtml prefers shallowest index.html, ignores __MACOSX', () => {
+  assert.equal(pickEntryHtml(['a/b/index.html', 'index.html']), 'index.html');
+  assert.equal(pickEntryHtml(['__MACOSX/index.html', 'sub/page.html']), 'sub/page.html');
+  assert.equal(pickEntryHtml(['main.css']), null);
 });

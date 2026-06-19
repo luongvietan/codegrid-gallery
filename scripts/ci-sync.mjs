@@ -26,8 +26,8 @@ function requireEnv() {
 
 const awsEnv = () => ({
   ...process.env,
-  AWS_ACCESS_KEY_ID: R2_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY: R2_SECRET_ACCESS_KEY,
+  AWS_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+  AWS_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
   AWS_DEFAULT_REGION: 'auto',
 });
 
@@ -43,12 +43,18 @@ async function fetchMessagesAfter(channelId, afterId, token) {
       await new Promise((r) => setTimeout(r, wait));
       continue;
     }
+    if (resp.status >= 500) {
+      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      continue;
+    }
     if (resp.status === 401 || resp.status === 403) {
       throw new Error(`Discord auth failed (HTTP ${resp.status}). Refresh the DISCORD_TOKEN secret.`);
     }
     if (!resp.ok) throw new Error(`Discord HTTP ${resp.status}: ${await resp.text()}`);
     const batch = await resp.json();
-    if (batch.length === 100) console.warn('[WARN] 100 messages returned — back-catalog gap larger than one page.');
+    if (batch.length === 100) {
+      throw new Error('Discord returned a full page (100 new messages) after the last known id. This is more than one page of new posts; run the manual backfill (download_codegrid.py + build-index) instead — the daily sync is incremental-only.');
+    }
     return batch;
   }
   throw new Error('Discord fetch failed after retries');
@@ -78,8 +84,11 @@ function uploadFolderToR2(localDir, folder) {
 function verifyR2(folder, filenames) {
   const out = execFileSync('aws', ['s3', 'ls', `s3://${R2_BUCKET}/${folder}/`, '--endpoint-url', R2_ENDPOINT],
     { env: awsEnv() }).toString();
+  const lines = out.split('\n');
   for (const f of filenames) {
-    if (!out.includes(f)) throw new Error(`R2 verify failed: ${folder}/${f} missing after upload`);
+    if (!lines.some((l) => l.endsWith(' ' + f))) {
+      throw new Error(`R2 verify failed: ${folder}/${f} missing after upload`);
+    }
   }
 }
 
@@ -96,22 +105,30 @@ async function main() {
 
   const msgs = await fetchMessagesAfter(CHANNEL_ID, after, DISCORD_TOKEN);
   const candidates = msgs
-    .filter((m) => !known.has(m.id) && extractAttachments(m).zips.length > 0)
-    .sort((a, b) => (BigInt(a.id) < BigInt(b.id) ? -1 : 1));
+    .flatMap((m) => {
+      const att = extractAttachments(m);
+      return !known.has(m.id) && att.zips.length > 0 ? [{ msg: m, att }] : [];
+    })
+    .sort((a, b) => (BigInt(a.msg.id) < BigInt(b.msg.id) ? -1 : 1));
   console.log(`New posts with a zip: ${candidates.length}`);
   if (candidates.length === 0) { console.log('Nothing to do.'); return; }
 
   const newEntries = [];
-  for (const msg of candidates) {
+  for (const { msg, att } of candidates) {
     const folder = folderNameForMessage(msg);
-    const att = extractAttachments(msg);
     const all = [...att.zips, ...att.images, ...att.videos];
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cg-'));
     const dir = path.join(tmp, folder);
     fs.mkdirSync(dir, { recursive: true });
     console.log(`\n-> ${folder} (${all.length} files)`);
     try {
-      for (const f of all) await downloadTo(f.url, path.join(dir, f.filename));
+      for (const f of all) {
+        const dest = path.resolve(dir, f.filename);
+        if (!dest.startsWith(path.resolve(dir) + path.sep)) {
+          throw new Error(`Unsafe or empty attachment filename in message ${msg.id}: ${JSON.stringify(f.filename)}`);
+        }
+        await downloadTo(f.url, dest);
+      }
       uploadFolderToR2(dir, folder);
       verifyR2(folder, all.map((f) => f.filename));
       const names = listZipEntries(fs.readFileSync(path.join(dir, att.zips[0].filename)));
@@ -122,7 +139,9 @@ async function main() {
   }
 
   const merged = mergeIndex(index, newEntries);
-  fs.writeFileSync(INDEX_PATH, JSON.stringify(merged));
+  const tmpIndex = INDEX_PATH + '.tmp';
+  fs.writeFileSync(tmpIndex, JSON.stringify(merged));
+  fs.renameSync(tmpIndex, INDEX_PATH);
   setChanged();
   console.log(`\nDone. Added ${newEntries.length} project(s); index now ${merged.projects.length}.`);
 }

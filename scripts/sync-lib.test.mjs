@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sanitizeFilename, folderNameForMessage, extractAttachments, classify, pickEntryHtml,
+  slug, prettyTitle, pickThumbnail, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
 } from './sync-lib.mjs';
 
 test('sanitizeFilename replaces invalid chars and trims', () => {
@@ -56,4 +57,42 @@ test('pickEntryHtml prefers shallowest index.html, ignores __MACOSX', () => {
   assert.equal(pickEntryHtml(['a/b/index.html', 'index.html']), 'index.html');
   assert.equal(pickEntryHtml(['__MACOSX/index.html', 'sub/page.html']), 'sub/page.html');
   assert.equal(pickEntryHtml(['main.css']), null);
+});
+
+test('slug and prettyTitle', () => {
+  assert.equal(slug('2026-06-17_HELLO WORLD!!'), '2026_06_17_HELLO_WORLD');
+  assert.equal(prettyTitle('2026-06-17_HELLO_WORLD'), 'HELLO WORLD');
+});
+
+test('pickThumbnail prefers png then jpg/webp', () => {
+  assert.equal(pickThumbnail([{ filename: 'a.jpg' }, { filename: 'b.png' }]), 'b.png');
+  assert.equal(pickThumbnail([{ filename: 'a.jpg' }]), 'a.jpg');
+  assert.equal(pickThumbnail([]), null);
+});
+
+test('buildProjectEntry shape', () => {
+  const msg = { id: '7', timestamp: '2026-06-17T20:00:00Z', author: { username: 'harrnish' } };
+  const att = { zips: [{ url: 'z', filename: 'CODE.zip', size: 1 }], images: [{ url: 'i', filename: 'c.jpg', size: 2 }], videos: [] };
+  const e = buildProjectEntry({ msg, folder: '2026-06-17_FOO', type: 'react', entryHtml: null, attachments: att });
+  assert.equal(e.id, '2026_06_17_FOO');
+  assert.equal(e.title, 'FOO');
+  assert.equal(e.type, 'react');
+  assert.equal(e.msgId, '7');
+  assert.equal(e.thumbnail, 'c.jpg');
+  assert.equal(e.zip, 'CODE.zip');
+  assert.equal(e.author, 'harrnish');
+  assert.deepEqual(e.media.zips, att.zips);
+});
+
+test('knownMsgIds and newestMsgId', () => {
+  const index = { projects: [{ msgId: '100' }, { msgId: '300' }, { msgId: '200' }] };
+  assert.ok(knownMsgIds(index).has('300'));
+  assert.equal(newestMsgId(index), '300');
+});
+
+test('mergeIndex dedupes by id, sorts by folder, recomputes counts', () => {
+  const index = { projects: [{ id: 'b', folder: '2026-02_B', type: 'html', msgId: '2' }] };
+  const merged = mergeIndex(index, [{ id: 'a', folder: '2026-01_A', type: 'react', msgId: '1' }]);
+  assert.deepEqual(merged.projects.map((p) => p.id), ['a', 'b']);
+  assert.deepEqual(merged.counts, { react: 1, html: 1 });
 });

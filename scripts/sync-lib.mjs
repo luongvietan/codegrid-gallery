@@ -69,3 +69,62 @@ export function pickEntryHtml(names) {
   const any = names.filter((n) => !n.startsWith('__MACOSX/') && /\.html$/i.test(n));
   return any.length ? any.sort(byDepth)[0] : null;
 }
+
+/** Strip leading date, turn underscores into spaces, collapse whitespace. Mirrors build-index.mjs. */
+export function prettyTitle(folder) {
+  return folder.replace(/^\d{4}-\d{2}-\d{2}_/, '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Stable id from a folder name. Mirrors build-index.mjs. */
+export function slug(folder) {
+  return folder.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** Choose a thumbnail filename: png first, then jpg/jpeg/webp, else the first image. */
+export function pickThumbnail(images) {
+  const png = images.find((i) => /\.png$/i.test(i.filename));
+  const other = images.find((i) => /\.(jpe?g|webp)$/i.test(i.filename));
+  return (png || other || images[0])?.filename ?? null;
+}
+
+/** Build one index project entry (same shape build-index.mjs produces). */
+export function buildProjectEntry({ msg, folder, type, entryHtml, attachments }) {
+  return {
+    id: slug(folder),
+    folder,
+    title: prettyTitle(folder),
+    type,
+    date: (msg.timestamp || '').slice(0, 10) || null,
+    author: msg.author?.username ?? null,
+    msgId: msg.id,
+    thumbnail: pickThumbnail(attachments.images),
+    video: attachments.videos[0]?.filename ?? null,
+    zip: attachments.zips[0]?.filename ?? null,
+    entryHtml,
+    media: { images: attachments.images, videos: attachments.videos, zips: attachments.zips },
+  };
+}
+
+/** Set of msgIds already in the index. */
+export function knownMsgIds(index) {
+  return new Set((index.projects || []).map((p) => p.msgId).filter(Boolean));
+}
+
+/** Largest msgId (Discord snowflake) in the index, or null. */
+export function newestMsgId(index) {
+  let max = null;
+  for (const p of index.projects || []) {
+    if (!p.msgId) continue;
+    if (max === null || BigInt(p.msgId) > BigInt(max)) max = p.msgId;
+  }
+  return max;
+}
+
+/** Merge new entries into the index: dedupe by id, sort by folder, recompute counts + generatedAt. */
+export function mergeIndex(index, newEntries, now = new Date()) {
+  const map = new Map((index.projects || []).map((p) => [p.id, p]));
+  for (const e of newEntries) map.set(e.id, e);
+  const projects = [...map.values()].sort((a, b) => a.folder.localeCompare(b.folder));
+  const counts = projects.reduce((m, p) => ((m[p.type] = (m[p.type] || 0) + 1), m), {});
+  return { generatedAt: now.toISOString(), counts, projects };
+}

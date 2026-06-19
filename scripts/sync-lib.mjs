@@ -84,7 +84,7 @@ export function slug(folder) {
 export function pickThumbnail(images) {
   const png = images.find((i) => /\.png$/i.test(i.filename));
   const other = images.find((i) => /\.(jpe?g|webp)$/i.test(i.filename));
-  return (png || other || images[0])?.filename ?? null;
+  return (png || other || images[0])?.filename || null;
 }
 
 /** Build one index project entry (same shape build-index.mjs produces). */
@@ -114,7 +114,7 @@ export function knownMsgIds(index) {
 export function newestMsgId(index) {
   let max = null;
   for (const p of index.projects || []) {
-    if (!p.msgId) continue;
+    if (!p.msgId || !/^\d+$/.test(p.msgId)) continue;
     if (max === null || BigInt(p.msgId) > BigInt(max)) max = p.msgId;
   }
   return max;

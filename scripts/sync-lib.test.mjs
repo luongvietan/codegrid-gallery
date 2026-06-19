@@ -90,9 +90,16 @@ test('knownMsgIds and newestMsgId', () => {
   assert.equal(newestMsgId(index), '300');
 });
 
+test('newestMsgId compares as BigInt, not lexicographically', () => {
+  const index = { projects: [{ msgId: '1000000000000000000' }, { msgId: '999999999999999999' }] };
+  assert.equal(newestMsgId(index), '1000000000000000000');
+});
+
 test('mergeIndex dedupes by id, sorts by folder, recomputes counts', () => {
   const index = { projects: [{ id: 'b', folder: '2026-02_B', type: 'html', msgId: '2' }] };
-  const merged = mergeIndex(index, [{ id: 'a', folder: '2026-01_A', type: 'react', msgId: '1' }]);
+  const now = new Date('2026-01-01T00:00:00Z');
+  const merged = mergeIndex(index, [{ id: 'a', folder: '2026-01_A', type: 'react', msgId: '1' }], now);
   assert.deepEqual(merged.projects.map((p) => p.id), ['a', 'b']);
   assert.deepEqual(merged.counts, { react: 1, html: 1 });
+  assert.equal(merged.generatedAt, '2026-01-01T00:00:00.000Z');
 });

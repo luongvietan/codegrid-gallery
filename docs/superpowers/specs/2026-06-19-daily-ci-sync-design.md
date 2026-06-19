@@ -53,17 +53,21 @@ Key constraints discovered:
 ```
 .github/workflows/daily-sync.yml   # cron + manual trigger, runs the script, commits
 scripts/
-  lib-zip.mjs        # zip-listing + classify + pickEntryHtml + folder/slug/title helpers
-  ci-sync.mjs        # orchestrator
-  ci-sync.test.mjs   # unit tests for the pure logic
-data/index.json      # updated in place
+  sync-lib.mjs        # all pure helpers (message parsing, zip-listing/classify/entryHtml, index build/merge/ledger)
+  sync-lib.test.mjs   # node:test unit tests for the pure logic
+  ci-sync.mjs         # I/O orchestrator
+data/index.json       # updated in place
 docs/superpowers/specs/2026-06-19-daily-ci-sync-design.md   # this spec
 ```
 
-`lib-zip.mjs` holds logic lifted verbatim from `build-index.mjs` so the two stay
-consistent: `listZipEntries(buf)`, `classify(names)`, `pickEntryHtml(names)`,
-`prettyTitle(folder)`, `slug(folder)`. (The standalone `build-index.mjs` stays usable
-locally and may import the same module later; not required for this work.)
+> Note: an earlier draft of this section split the pure helpers across `lib-zip.mjs`; the
+> delivered implementation consolidates them into a single pure module `sync-lib.mjs` (as
+> specified in the implementation plan). The `ci-sync.mjs` orchestrator imports from it.
+
+`sync-lib.mjs` holds the zip/classification logic lifted verbatim from `build-index.mjs` so
+the two stay consistent: `listZipEntries(buf)`, `classify(names)`, `pickEntryHtml(names)`,
+`prettyTitle(folder)`, `slug(folder)` — alongside the message-parsing and index-merge
+helpers. (The standalone `build-index.mjs` stays usable locally; not required for this work.)
 
 ## `ci-sync.mjs` algorithm
 

@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test scripts/*.test.mjs",
+    "ingest": "node scripts/ingest.mjs",
+    "ingest:plan": "node scripts/ingest.mjs plan",
+    "corpus:query": "node scripts/corpus-query.mjs",
+    "learn": "node scripts/learn.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

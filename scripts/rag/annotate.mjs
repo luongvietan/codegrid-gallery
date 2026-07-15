@@ -15,9 +15,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTextFile } from '../ingest-lib.mjs';
 import { ENUMS, LLM_FIELDS, validateCard } from './schema.mjs';
+import { resolveLlm, createChat } from './llm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const MODEL = 'claude-opus-4-8';
 const MAX_SOURCE = 45000;
 const FRAMEWORK_HINT = { html: 'vanilla', react: 'react', nextjs: 'next' };
 
@@ -93,12 +93,11 @@ function extractJson(text) {
   return JSON.parse(t.slice(s, e + 1));
 }
 
-async function annotateOne(client, record, source, frameworkHint) {
+async function annotateOne(chat, record, source, frameworkHint) {
   let messages = [{ role: 'user', content: buildPrompt(record, source, frameworkHint) }];
   let lastErr = 'unknown';
   for (let attempt = 0; attempt < 3; attempt++) {
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, messages });
-    const text = resp.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+    const text = await chat(messages, 3000);
     let card;
     try { card = extractJson(text); } catch (e) { lastErr = e.message; messages.push({ role: 'assistant', content: text }, { role: 'user', content: `That was not valid JSON (${e.message}). Return ONLY the JSON object.` }); continue; }
     const { ok, errors } = validateCard(card);
@@ -111,13 +110,16 @@ async function annotateOne(client, record, source, frameworkHint) {
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  if (!process.env.ANTHROPIC_API_KEY) { console.error('Set ANTHROPIC_API_KEY first.'); process.exit(1); }
   const manifestPath = path.join(opts.corpus, 'manifest.json');
   if (!fs.existsSync(manifestPath)) { console.error(`No corpus manifest. Run: node scripts/ingest.mjs`); process.exit(1); }
-  let Anthropic;
-  try { ({ default: Anthropic } = await import('@anthropic-ai/sdk')); }
-  catch { console.error('Run: npm i @anthropic-ai/sdk'); process.exit(1); }
-  const client = new Anthropic();
+  const llm = resolveLlm();
+  if (llm.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+    console.error('Set ANTHROPIC_API_KEY, or use a free/local endpoint:\n  LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3-coder node scripts/rag/annotate.mjs');
+    process.exit(1);
+  }
+  let chat;
+  try { chat = await createChat(llm); } catch (e) { console.error(e.message); process.exit(1); }
+  console.log(`Annotating with ${llm.provider}:${llm.model}${llm.baseUrl ? ` @ ${llm.baseUrl}` : ''}`);
 
   const cardsDir = path.join(opts.corpus, 'cards');
   fs.mkdirSync(cardsDir, { recursive: true });
@@ -137,9 +139,9 @@ async function main() {
       const { source, loc } = gatherSource(dir, record);
       if (!source.trim()) { console.log(`[${++done}/${projects.length}] ${p.id} · no source`); continue; }
       try {
-        const card = await annotateOne(client, record, source, FRAMEWORK_HINT[p.type] || 'vanilla');
+        const card = await annotateOne(chat, record, source, FRAMEWORK_HINT[p.type] || 'vanilla');
         const full = { id: p.id, source_path: record.folder, origin_site: null, loc,
-          schema_version: 1, annotator_model: MODEL, ...card, code: source.slice(0, 60000) };
+          schema_version: 1, annotator_model: llm.model, ...card, code: source.slice(0, 60000) };
         fs.writeFileSync(out, JSON.stringify(full, null, 2));
         console.log(`[${++done}/${projects.length}] ${p.id} · ${card.scope}/${card.comp_type} ✓`);
       } catch (e) {

@@ -6,6 +6,8 @@
 const CONFIG = {
   openai: { url: 'https://api.openai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'text-embedding-3-small', keyVar: 'OPENAI_API_KEY', dim: 1536 },
   voyage: { url: 'https://api.voyageai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'voyage-3', keyVar: 'VOYAGE_API_KEY', dim: 1024 },
+  // Free + local: `ollama pull bge-m3` (dim 1024, matches the migration). No key.
+  ollama: { url: `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1').replace(/\/+$/, '')}/embeddings`, model: process.env.EMBED_MODEL || 'bge-m3', keyVar: null, dim: 1024 },
 };
 
 export function embedConfig() {
@@ -18,14 +20,14 @@ export function embedConfig() {
 /** Embed an array of strings. Batches of 64; throws with a clear message if the key is missing. */
 export async function embedBatch(texts) {
   const c = embedConfig();
-  const key = process.env[c.keyVar];
-  if (!key) throw new Error(`Set ${c.keyVar} for EMBED_PROVIDER=${c.name}`);
+  const key = c.keyVar ? process.env[c.keyVar] : null;
+  if (c.keyVar && !key) throw new Error(`Set ${c.keyVar} for EMBED_PROVIDER=${c.name}`);
   const out = [];
   for (let i = 0; i < texts.length; i += 64) {
     const chunk = texts.slice(i, i + 64);
     const resp = await fetch(c.url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
       body: JSON.stringify({ model: c.model, input: chunk }),
     });
     if (!resp.ok) throw new Error(`${c.name} embeddings HTTP ${resp.status}: ${await resp.text()}`);

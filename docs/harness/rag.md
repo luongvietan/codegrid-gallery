@@ -67,6 +67,39 @@ filters (`--exclude-hijack`, `--exclude-lib locomotive`), not composer patches.
 | 3. **Eval (DB-free)** | `VOYAGE_API_KEY=… node scripts/rag/eval.mjs` | embedded cards on disk |
 | 4. Search | `node scripts/rag/search.mjs "dark editorial hero" --type hero --exclude-hijack` | cards (`--supabase` for the RPC) |
 
+### Run it 100% free / local (no API keys, no rate limits)
+
+The pipeline is a **batch job**, not an interactive coding agent — so "free agent" here
+means a **free model endpoint**, not Cline/Antigravity. Both LLM steps take any
+OpenAI-compatible endpoint; the strongest free option is [Ollama](https://ollama.com)
+running a code model locally (unlimited, private). Voyage/OpenAI stay the default; these
+env vars swap in the free path.
+
+```bash
+# one-time: install Ollama, then pull a code model + an embedding model
+ollama pull qwen3-coder        # annotator (strong open code model)
+ollama pull bge-m3             # embeddings, dim 1024 (matches the migration)
+
+# annotate with the local model (no ANTHROPIC_API_KEY, no @anthropic-ai/sdk needed)
+LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3-coder \
+  node scripts/rag/annotate.mjs --limit 20
+
+# embed + eval with the local embedding model
+EMBED_PROVIDER=ollama node scripts/rag/embed.mjs
+EMBED_PROVIDER=ollama node scripts/rag/eval.mjs
+```
+
+No local GPU? Use a hosted free tier instead — same flags, different endpoint:
+
+```bash
+# annotate via OpenRouter free models (rate-limited)
+LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 \
+  LLM_API_KEY=sk-or-... LLM_MODEL=qwen/qwen3-coder:free node scripts/rag/annotate.mjs
+```
+
+`validateCard` + the retry loop matter most here: a weaker free model that emits an
+off-enum value gets rejected and re-prompted, so the cards stay clean regardless of model.
+
 Step 3 is the "measure before you index 400" gate: 20 diverse sources
 (`node scripts/rag/select-diverse` logic is in `retrieval.mjs`), 10 briefs
 (`eval-briefs.sample.json`), top-3 hit rate. **Two failure signals mean fix the schema,
@@ -78,10 +111,13 @@ re-annotate, not a migration.
 ## Decisions you should confirm
 
 - **Embedding provider.** Claude has no embeddings endpoint. Default is Voyage
-  `voyage-3` (dim **1024**, matches the migration; needs `VOYAGE_API_KEY`). To use
-  OpenAI (`text-embedding-3-small`, dim 1536) set `EMBED_PROVIDER=openai` **and** change
-  every `vector(1024)` in the migration to `vector(1536)`. Never commit the key — pass
-  it as an env var / secret.
+  `voyage-3` (dim **1024**, matches the migration; needs `VOYAGE_API_KEY`).
+  `EMBED_PROVIDER=ollama` uses local `bge-m3` (dim 1024, free); `EMBED_PROVIDER=openai`
+  uses `text-embedding-3-small` (dim 1536 — then change every `vector(1024)` in the
+  migration to `vector(1536)`). Never commit the key — pass it as an env var / secret.
+- **LLM provider (annotate).** Default Anthropic `claude-opus-4-8`. For a free run set
+  `LLM_PROVIDER=openai` + `LLM_BASE_URL`/`LLM_MODEL` at any OpenAI-compatible endpoint
+  (Ollama local, OpenRouter free, DashScope). See "Run it 100% free / local" above.
 - **Where to run.** Annotate/embed need the corpus + API keys, so they run on your
   machine or CI — not inside an egress-restricted sandbox (where R2 is blocked).
 - **Which Supabase project.** The migration is a file on purpose — run it against a

@@ -7,11 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test scripts/*.test.mjs",
+    "test": "node --test 'scripts/*.test.mjs' 'scripts/rag/*.test.mjs'",
     "ingest": "node scripts/ingest.mjs",
     "ingest:plan": "node scripts/ingest.mjs plan",
     "corpus:query": "node scripts/corpus-query.mjs",
-    "learn": "node scripts/learn.mjs"
+    "learn": "node scripts/learn.mjs",
+    "rag:annotate": "node scripts/rag/annotate.mjs",
+    "rag:embed": "node scripts/rag/embed.mjs",
+    "rag:eval": "node scripts/rag/eval.mjs",
+    "rag:search": "node scripts/rag/search.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

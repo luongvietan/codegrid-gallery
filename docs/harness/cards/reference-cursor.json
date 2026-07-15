@@ -1,0 +1,47 @@
+{
+  "id": "src_204",
+  "source_path": "2024-01-08_MAGNETIC CURSOR FOLLOW",
+  "origin_site": null,
+  "loc": 96,
+  "schema_version": 1,
+  "annotator_model": "reference-handwritten",
+  "scope": "global",
+  "comp_type": "cursor",
+  "framework": "vanilla",
+  "animation_libs": ["gsap"],
+  "css_approach": "vanilla_css",
+  "needs_webgl": false,
+  "asset_types": [],
+  "side_effects": ["own_raf_loop", "pointer_listener_global", "fixed_layer"],
+  "aesthetic": ["minimal", "tech"],
+  "motion_character": ["cursor_follow", "hover_driven"],
+  "density": "sparse",
+  "color_mood": "dark",
+  "description": "A custom pointer that replaces the default cursor across the whole page. It is a small hollow ring that trails the real pointer with a slight lag, easing toward its target each frame so movement feels weighted rather than instant. Over interactive elements the ring grows and fills, and when hovering a link it snaps toward the element's center as if magnetized. The native cursor is hidden. It sits above all content and does not occupy any layout space. Mechanism: a fixed element is moved every animation frame toward the last pointer position with linear interpolation, and hover handlers scale and re-target it.",
+  "retrieval_probes": [
+    "custom cursor that follows the mouse with lag",
+    "magnetic cursor that snaps to links on hover",
+    "circle cursor with smooth trailing motion",
+    "minimal ring pointer replacing the default cursor"
+  ],
+  "dom_root": ".cursor",
+  "entry_point": "initCursor()",
+  "design_tokens": {
+    "fonts": [],
+    "type_scale_px": [],
+    "colors": { "bg": null, "fg": "#FFFFFF", "accent": null },
+    "spacing_unit_px": null,
+    "radius_px": 9999,
+    "max_width_px": null,
+    "grid_columns": null
+  },
+  "content_slots": {
+    "text": [],
+    "media": [],
+    "repeatable": null
+  },
+  "responsive": "fluid",
+  "coupling": "standalone",
+  "notes": "Pointer-driven; disable on touch devices (no hover).",
+  "code": "<!-- raw source lives here as the payload; truncated in this reference exemplar -->"
+}

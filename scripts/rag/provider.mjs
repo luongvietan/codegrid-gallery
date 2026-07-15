@@ -1,0 +1,36 @@
+// scripts/rag/provider.mjs — embedding provider (dependency-free via fetch).
+// Claude has NO embeddings endpoint, so the embedding model is a separate provider.
+// Default: OpenAI text-embedding-3-small (dim 1536, matches the SQL migration).
+// Swap with EMBED_PROVIDER=voyage (voyage-3, dim 1024 — also change vector(1536)
+// in supabase/migrations/0001_codegrid_rag.sql to vector(1024)).
+const CONFIG = {
+  openai: { url: 'https://api.openai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'text-embedding-3-small', keyVar: 'OPENAI_API_KEY', dim: 1536 },
+  voyage: { url: 'https://api.voyageai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'voyage-3', keyVar: 'VOYAGE_API_KEY', dim: 1024 },
+};
+
+export function embedConfig() {
+  const name = process.env.EMBED_PROVIDER || 'openai';
+  const c = CONFIG[name];
+  if (!c) throw new Error(`Unknown EMBED_PROVIDER "${name}" (openai|voyage)`);
+  return { name, ...c };
+}
+
+/** Embed an array of strings. Batches of 64; throws with a clear message if the key is missing. */
+export async function embedBatch(texts) {
+  const c = embedConfig();
+  const key = process.env[c.keyVar];
+  if (!key) throw new Error(`Set ${c.keyVar} for EMBED_PROVIDER=${c.name}`);
+  const out = [];
+  for (let i = 0; i < texts.length; i += 64) {
+    const chunk = texts.slice(i, i + 64);
+    const resp = await fetch(c.url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: c.model, input: chunk }),
+    });
+    if (!resp.ok) throw new Error(`${c.name} embeddings HTTP ${resp.status}: ${await resp.text()}`);
+    const json = await resp.json();
+    for (const d of json.data) out.push(d.embedding);
+  }
+  return out;
+}

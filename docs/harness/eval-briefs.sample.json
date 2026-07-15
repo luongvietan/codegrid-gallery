@@ -1,0 +1,36 @@
+[
+  { "query": "dark editorial hero where the headline reveals letter by letter on scroll",
+    "expect_id": "src_087",
+    "filters": { "scope": "section", "compType": "hero", "excludeSideEffects": ["scroll_hijack"] } },
+
+  { "query": "oversized text hero that bleeds off the screen edges, no images",
+    "expect_id": "src_087",
+    "filters": { "scope": "section", "compType": "hero" } },
+
+  { "query": "custom cursor that follows the mouse with a bit of lag and snaps to links",
+    "expect_id": "src_204",
+    "filters": { "scope": "global", "compType": "cursor" } },
+
+  { "query": "minimal ring pointer replacing the default cursor",
+    "expect_id": "src_204",
+    "filters": { "scope": "global" } },
+
+  { "query": "brutalist editorial hero on a near-black background",
+    "expect_id": "src_087",
+    "filters": { "scope": "section", "aesthetic": ["editorial", "brutalist"] } },
+
+  { "query": "smooth scrolling for the whole page",
+    "filters": { "scope": "global", "compType": "smooth_scroll" } },
+
+  { "query": "horizontal project gallery you drag through",
+    "filters": { "scope": "section", "compType": "gallery" } },
+
+  { "query": "full-screen menu overlay that slides in",
+    "filters": { "scope": "overlay", "compType": "menu" } },
+
+  { "query": "marquee strip of text scrolling sideways forever",
+    "filters": { "scope": "section", "compType": "marquee" } },
+
+  { "query": "sticky work grid with hover image reveal, but no scroll hijacking library",
+    "filters": { "scope": "section", "compType": "work_grid", "excludeAnimLibs": ["locomotive"], "excludeSideEffects": ["scroll_hijack"] } }
+]

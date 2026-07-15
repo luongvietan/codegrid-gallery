@@ -5,9 +5,9 @@
 -- Enum values MUST stay in sync with scripts/rag/schema.mjs (ENUMS) — the test
 -- scripts/rag/schema.test.mjs asserts they never drift.
 --
--- vector(1536) matches OpenAI text-embedding-3-small. If you switch the embedding
--- provider (e.g. Voyage voyage-3 = 1024), change EVERY vector(1536) below to the
--- new dimension and re-run. See docs/harness/rag.md.
+-- vector(1024) matches Voyage voyage-3 (the default embedding provider). If you
+-- switch providers (e.g. OpenAI text-embedding-3-small = 1536), change EVERY
+-- vector(1024) below to the new dimension and re-run. See docs/harness/rag.md.
 
 create extension if not exists vector;
 
@@ -90,7 +90,7 @@ create table components (
   -- SEMANTIC -> embedding (of description + retrieval_probes)
   description      text not null,
   retrieval_probes text[] not null default '{}',
-  embedding        vector(1536),
+  embedding        vector(1024),
 
   -- COMPOSER needs
   dom_root       text,
@@ -119,7 +119,7 @@ create table techniques (
   variations       text[] not null default '{}',
   description      text not null,
   retrieval_probes text[] not null default '{}',
-  embedding        vector(1536),
+  embedding        vector(1024),
   schema_version   int not null default 1
 );
 
@@ -136,7 +136,7 @@ create table component_techniques (
 -- WHERE cuts 400 -> a handful of valid candidates FIRST; vector ranks within that.
 -- Never vector-search all 400 then filter. Null args skip their filter.
 create or replace function search_components(
-  query_embedding        vector(1536),
+  query_embedding        vector(1024),
   f_scope                comp_scope      default null,
   f_comp_type            comp_type       default null,
   f_aesthetic            aesthetic_tag[] default null,

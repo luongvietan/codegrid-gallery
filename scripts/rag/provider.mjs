@@ -1,15 +1,15 @@
 // scripts/rag/provider.mjs — embedding provider (dependency-free via fetch).
 // Claude has NO embeddings endpoint, so the embedding model is a separate provider.
-// Default: OpenAI text-embedding-3-small (dim 1536, matches the SQL migration).
-// Swap with EMBED_PROVIDER=voyage (voyage-3, dim 1024 — also change vector(1536)
-// in supabase/migrations/0001_codegrid_rag.sql to vector(1024)).
+// Default: Voyage voyage-3 (dim 1024, matches the SQL migration).
+// Swap with EMBED_PROVIDER=openai (text-embedding-3-small, dim 1536 — also change
+// vector(1024) in supabase/migrations/0001_codegrid_rag.sql to vector(1536)).
 const CONFIG = {
   openai: { url: 'https://api.openai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'text-embedding-3-small', keyVar: 'OPENAI_API_KEY', dim: 1536 },
   voyage: { url: 'https://api.voyageai.com/v1/embeddings', model: process.env.EMBED_MODEL || 'voyage-3', keyVar: 'VOYAGE_API_KEY', dim: 1024 },
 };
 
 export function embedConfig() {
-  const name = process.env.EMBED_PROVIDER || 'openai';
+  const name = process.env.EMBED_PROVIDER || 'voyage';
   const c = CONFIG[name];
   if (!c) throw new Error(`Unknown EMBED_PROVIDER "${name}" (openai|voyage)`);
   return { name, ...c };

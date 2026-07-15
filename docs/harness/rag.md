@@ -63,8 +63,8 @@ filters (`--exclude-hijack`, `--exclude-lib locomotive`), not composer patches.
 |---|---|---|
 | 0. Migrate | `psql < supabase/migrations/0001_codegrid_rag.sql` (or Supabase SQL editor) | a Supabase/Postgres project |
 | 1. Annotate | `ANTHROPIC_API_KEY=… node scripts/rag/annotate.mjs --limit 20` | corpus + `@anthropic-ai/sdk` |
-| 2. Embed | `OPENAI_API_KEY=… node scripts/rag/embed.mjs` (add `--supabase` to upsert) | an embedding key |
-| 3. **Eval (DB-free)** | `OPENAI_API_KEY=… node scripts/rag/eval.mjs` | embedded cards on disk |
+| 2. Embed | `VOYAGE_API_KEY=… node scripts/rag/embed.mjs` (add `--supabase` to upsert) | an embedding key |
+| 3. **Eval (DB-free)** | `VOYAGE_API_KEY=… node scripts/rag/eval.mjs` | embedded cards on disk |
 | 4. Search | `node scripts/rag/search.mjs "dark editorial hero" --type hero --exclude-hijack` | cards (`--supabase` for the RPC) |
 
 Step 3 is the "measure before you index 400" gate: 20 diverse sources
@@ -77,14 +77,15 @@ re-annotate, not a migration.
 
 ## Decisions you should confirm
 
-- **Embedding provider.** Claude has no embeddings endpoint. Default is OpenAI
-  `text-embedding-3-small` (dim **1536**, matches the migration). To use Voyage
-  (`voyage-3`, dim 1024) set `EMBED_PROVIDER=voyage` **and** change every `vector(1536)`
-  in the migration to `vector(1024)`.
+- **Embedding provider.** Claude has no embeddings endpoint. Default is Voyage
+  `voyage-3` (dim **1024**, matches the migration; needs `VOYAGE_API_KEY`). To use
+  OpenAI (`text-embedding-3-small`, dim 1536) set `EMBED_PROVIDER=openai` **and** change
+  every `vector(1024)` in the migration to `vector(1536)`. Never commit the key — pass
+  it as an env var / secret.
 - **Where to run.** Annotate/embed need the corpus + API keys, so they run on your
   machine or CI — not inside an egress-restricted sandbox (where R2 is blocked).
-- **Which Supabase project.** The migration is a file on purpose — point it at a
-  codegrid project (new or chosen), not an unrelated one.
+- **Which Supabase project.** The migration is a file on purpose — run it against a
+  dedicated codegrid project you create, not an unrelated one.
 
 ## Not yet built (deliberate next passes)
 

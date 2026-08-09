@@ -1,41 +1,61 @@
 'use client';
-import { useEffect, useState } from 'react';
+
+import { useEffect, useRef, useState } from 'react';
+import { needsSourceZip, previewKind, type PreviewTab as Tab } from '@/lib/preview';
 import type { Project } from '@/lib/types';
 import { fetchAndExtractZip, type ExtractedZip } from '@/lib/zip';
-import PreviewTab from './tabs/PreviewTab';
 import CodeTab from './tabs/CodeTab';
 import MediaTab from './tabs/MediaTab';
+import PreviewTab from './tabs/PreviewTab';
+import StaticPreviewTab from './tabs/StaticPreviewTab';
 
 const TYPE_LABEL: Record<string, string> = { html: 'HTML', nextjs: 'Next.js', react: 'React' };
-type Tab = 'preview' | 'code' | 'media';
 
 export default function ProjectModal({ p, onClose, onToast }: {
   p: Project; onClose: () => void; onToast: (m: string) => void;
 }) {
-  const hasPreview = p.type === 'html' && !!p.entryHtml;
+  const kind = previewKind(p);
+  const hasPreview = kind !== 'none';
   const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : (p.type === 'html' ? 'media' : 'code'));
   const [zip, setZip] = useState<ExtractedZip | null>(null);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
     document.body.classList.add('modal-open');
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
-    let cancelled = false;
-    (async () => {
-      try {
-        const z = await fetchAndExtractZip(p.folder, p.zip);
-        if (!cancelled) setZip(z);
-      } catch (e) {
-        if (!cancelled) { setErr((e as Error).message); onToast('Lỗi đọc zip: ' + (e as Error).message); }
-      }
-    })();
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
       document.body.classList.remove('modal-open');
       document.removeEventListener('keydown', onKey);
     };
-  }, [p, onClose, onToast]);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!needsSourceZip(tab, kind) || zip || loading || loadingRef.current || err) return;
+
+    loadingRef.current = true;
+    setLoading(true);
+    (async () => {
+      try {
+        const loadedZip = await fetchAndExtractZip(p.folder, p.zip);
+        if (mountedRef.current) setZip(loadedZip);
+      } catch (error) {
+        if (mountedRef.current) {
+          const message = (error as Error).message;
+          setErr(message);
+          onToast('Lỗi đọc zip: ' + message);
+        }
+      } finally {
+        loadingRef.current = false;
+        if (mountedRef.current) setLoading(false);
+      }
+    })();
+  }, [err, kind, loading, onToast, p.folder, p.zip, tab, zip]);
 
   const sub = [p.date, p.author, p.folder].filter(Boolean).join(' · ');
 
@@ -59,11 +79,14 @@ export default function ProjectModal({ p, onClose, onToast }: {
           <button className="close" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
-          {err && <div className="spinner no-spin">Lỗi: {err}</div>}
-          {!err && !zip && <div className="spinner">Đang tải & giải nén zip…</div>}
-          {!err && zip && tab === 'preview' && hasPreview && <PreviewTab p={p} zip={zip} onToast={onToast} />}
-          {!err && zip && tab === 'code' && <CodeTab zip={zip} onToast={onToast} />}
-          {!err && zip && tab === 'media' && <MediaTab p={p} />}
+          {tab === 'preview' && kind === 'static' && p.preview && <StaticPreviewTab preview={p.preview} />}
+          {tab === 'preview' && kind === 'legacy-html' && err && <div className="spinner no-spin">Lỗi: {err}</div>}
+          {tab === 'preview' && kind === 'legacy-html' && !err && !zip && <div className="spinner">Đang tải &amp; giải nén zip…</div>}
+          {tab === 'preview' && kind === 'legacy-html' && !err && zip && <PreviewTab p={p} zip={zip} onToast={onToast} />}
+          {tab === 'code' && err && <div className="spinner no-spin">Lỗi: {err}</div>}
+          {tab === 'code' && !err && !zip && <div className="spinner">Đang tải &amp; giải nén zip…</div>}
+          {tab === 'code' && !err && zip && <CodeTab zip={zip} onToast={onToast} />}
+          {tab === 'media' && <MediaTab p={p} />}
         </div>
       </div>
     </div>

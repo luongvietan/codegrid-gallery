@@ -1,9 +1,16 @@
 import { assetUrl } from './assets.ts';
 import type { PreviewManifest, Project } from './types.ts';
 
+export type PreviewKind = 'legacy-html' | 'static' | 'none';
+export type PreviewTab = 'preview' | 'code' | 'media';
+
+export function needsSourceZip(tab: PreviewTab, kind: PreviewKind): boolean {
+  return tab === 'code' || (tab === 'preview' && kind === 'legacy-html');
+}
+
 export function previewKind(
   project: Pick<Project, 'type' | 'entryHtml' | 'preview'>,
-): 'legacy-html' | 'static' | 'none' {
+): PreviewKind {
   if (
     project.preview?.mode === 'static'
     && project.preview.status === 'ready'

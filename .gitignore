@@ -39,6 +39,7 @@ yarn-error.log*
 
 # editor / agent
 .claude/
+/.worktrees/
 
 # typescript
 *.tsbuildinfo

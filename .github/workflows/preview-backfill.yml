@@ -1,0 +1,54 @@
+name: preview-backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: Maximum project records to process (1-10)
+        required: true
+        default: "3"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preview-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check preview pipeline prerequisites
+        run: |
+          docker --version
+          unzip -v | head -1
+          aws --version
+      - name: Install dependencies
+        run: npm ci
+      - name: Run full preview pipeline tests
+        run: npm run test:pipeline
+      - name: Backfill preview metadata
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CHANNEL_ID: "1048241543477215275"
+          R2_ENDPOINT: "https://c43c4f2af4941428dc86d37bffcb7800.r2.cloudflarestorage.com"
+          R2_BUCKET: "codegrid-gallery"
+        run: node scripts/backfill-previews.mjs --limit "${{ inputs.limit }}"
+      - name: Commit and push updated preview metadata
+        run: |
+          if git diff --quiet -- data/index.json; then
+            echo "No preview metadata changed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -- data/index.json
+          git commit -m "data: backfill static preview metadata"
+          git push

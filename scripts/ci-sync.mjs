@@ -6,17 +6,20 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
-  folderNameForMessage, extractAttachments, listZipEntries, classify,
+  artifactUploadArgs, retryDelayMs, folderNameForMessage, extractAttachments,
   pickEntryHtml, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
 } from './sync-lib.mjs';
+import { inspectTemplateArchive, validateArchiveRecords } from './preview-classifier.mjs';
+import { BUILDER_VERSION, buildStaticPreview, sourceHash } from './preview-builder.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_PATH = path.join(ROOT, 'data', 'index.json');
 
 const {
-  DISCORD_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
-  CHANNEL_ID, R2_ENDPOINT, R2_BUCKET,
+  DISCORD_TOKEN, CHANNEL_ID, R2_ENDPOINT, R2_BUCKET,
 } = process.env;
+const MAX_ATTEMPTS = 5;
+const BUILDABLE_RUNTIMES = new Set(['vite-vanilla', 'vite-react', 'cra']);
 
 function requireEnv() {
   const missing = ['DISCORD_TOKEN', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'CHANNEL_ID', 'R2_ENDPOINT', 'R2_BUCKET']
@@ -31,20 +34,62 @@ const awsEnv = () => ({
   AWS_DEFAULT_REGION: 'auto',
 });
 
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+function retryAfterHeaderMs(value, now = Date.now()) {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - now) : null;
+}
+
+function retryAfterErrorMs(error) {
+  const detail = [error?.message, error?.stdout, error?.stderr].filter(Boolean).join('\n');
+  const match = detail.match(/(?:retry-after\s*[:=]|<RetryAfterSeconds>)\s*(\d+(?:\.\d+)?)/i);
+  return match ? Number(match[1]) * 1_000 : null;
+}
+
+function isTransientAwsError(error) {
+  const detail = [error?.message, error?.stdout, error?.stderr].filter(Boolean).join('\n');
+  return /\b(?:429|5\d\d)\b|SlowDown|Throttl|RequestTimeout|ServiceUnavailable|InternalError/i.test(detail);
+}
+
+async function runAws(args, options = {}) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      return execFileSync('aws', args, { env: awsEnv(), ...options });
+    } catch (error) {
+      if (attempt === MAX_ATTEMPTS - 1 || !isTransientAwsError(error)) {
+        if (error?.stderr) process.stderr.write(error.stderr);
+        throw error;
+      }
+      const wait = retryDelayMs(attempt, retryAfterErrorMs(error));
+      console.log(`R2 request throttled or unavailable; waiting ${wait}ms`);
+      await delay(wait);
+    }
+  }
+  throw new Error('R2 request failed after retries');
+}
+
 async function fetchMessagesAfter(channelId, afterId, token) {
   let url = `https://discord.com/api/v9/channels/${channelId}/messages?limit=100`;
   if (afterId) url += `&after=${afterId}`;
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const resp = await fetch(url, { headers: { Authorization: token, 'User-Agent': 'codegrid-ci/1.0' } });
     if (resp.status === 429) {
       const body = await resp.json().catch(() => ({}));
-      const wait = (body.retry_after || 5) * 1000;
+      if (attempt === MAX_ATTEMPTS - 1) break;
+      const retryAfter = retryAfterHeaderMs(resp.headers.get('retry-after'))
+        ?? (Number.isFinite(Number(body.retry_after)) ? Number(body.retry_after) * 1_000 : null);
+      const wait = retryDelayMs(attempt, retryAfter);
       console.log(`Rate limited; waiting ${wait}ms`);
-      await new Promise((r) => setTimeout(r, wait));
+      await delay(wait);
       continue;
     }
     if (resp.status >= 500) {
-      await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+      if (attempt === MAX_ATTEMPTS - 1) break;
+      await delay(retryDelayMs(attempt, retryAfterHeaderMs(resp.headers.get('retry-after'))));
       continue;
     }
     if (resp.status === 401 || resp.status === 403) {
@@ -61,35 +106,99 @@ async function fetchMessagesAfter(channelId, afterId, token) {
 }
 
 async function downloadTo(url, dest) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
       const resp = await fetch(url, { headers: { 'User-Agent': 'codegrid-ci/1.0' } });
+      if (resp.status === 429 || resp.status >= 500) {
+        if (attempt === MAX_ATTEMPTS - 1) throw new Error(`HTTP ${resp.status}`);
+        const wait = retryDelayMs(attempt, retryAfterHeaderMs(resp.headers.get('retry-after')));
+        console.log(`Attachment request throttled or unavailable; waiting ${wait}ms`);
+        await delay(wait);
+        continue;
+      }
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const buf = Buffer.from(await resp.arrayBuffer());
       if (buf.length === 0) throw new Error('empty download');
       fs.writeFileSync(dest, buf);
       return;
     } catch (e) {
-      if (attempt === 3) throw new Error(`Download failed for ${url}: ${e.message}`);
-      await new Promise((r) => setTimeout(r, 1500 * attempt));
+      if (attempt === MAX_ATTEMPTS - 1 || /^HTTP 4\d\d$/.test(e.message)) {
+        throw new Error(`Download failed for ${url}: ${e.message}`);
+      }
+      await delay(retryDelayMs(attempt, null));
     }
   }
 }
 
-function uploadFolderToR2(localDir, folder) {
-  execFileSync('aws', ['s3', 'cp', localDir, `s3://${R2_BUCKET}/${folder}`, '--recursive', '--endpoint-url', R2_ENDPOINT],
-    { env: awsEnv(), stdio: 'inherit' });
+async function uploadFolderToR2(localDir, folder) {
+  await runAws(['s3', 'cp', localDir, `s3://${R2_BUCKET}/${folder}`, '--recursive', '--endpoint-url', R2_ENDPOINT],
+    { stdio: ['ignore', 'inherit', 'pipe'] });
 }
 
-function verifyR2(folder, filenames) {
-  const out = execFileSync('aws', ['s3', 'ls', `s3://${R2_BUCKET}/${folder}/`, '--endpoint-url', R2_ENDPOINT],
-    { env: awsEnv() }).toString();
+async function verifyR2(folder, filenames) {
+  const out = (await runAws(['s3', 'ls', `s3://${R2_BUCKET}/${folder}/`, '--endpoint-url', R2_ENDPOINT])).toString();
   const lines = out.split('\n');
   for (const f of filenames) {
     if (!lines.some((l) => l.endsWith(' ' + f))) {
       throw new Error(`R2 verify failed: ${folder}/${f} missing after upload`);
     }
   }
+}
+
+function extractValidatedArchive(zipPath, projectDir, records) {
+  validateArchiveRecords(records);
+  fs.mkdirSync(projectDir, { recursive: true });
+  execFileSync('unzip', ['-q', zipPath, '-d', projectDir], { stdio: 'inherit' });
+}
+
+function unavailableBuild(zipBuffer, runtime, failureCode) {
+  return {
+    status: 'build-failed',
+    outputDir: null,
+    preview: {
+      mode: 'unavailable',
+      runtime,
+      sourceHash: sourceHash(zipBuffer, runtime),
+      artifactBase: null,
+      entry: null,
+      status: 'build-failed',
+      builderVersion: BUILDER_VERSION,
+      failureCode,
+    },
+  };
+}
+
+function disabledBuild(inspection, zipBuffer) {
+  return {
+    status: 'runtime-required',
+    outputDir: null,
+    preview: {
+      mode: 'webcontainer',
+      runtime: inspection.runtime,
+      sourceHash: sourceHash(zipBuffer, inspection.runtime),
+      artifactBase: null,
+      entry: null,
+      status: 'runtime-required',
+      builderVersion: BUILDER_VERSION,
+      failureCode: null,
+    },
+  };
+}
+
+function archiveFailureCode(error) {
+  return /too many entries|expanded size exceeds/i.test(error?.message || '')
+    ? 'archive-too-large'
+    : 'archive-invalid';
+}
+
+async function uploadReadyArtifact(build) {
+  await runAws(artifactUploadArgs(build.outputDir, build.preview.sourceHash, R2_BUCKET, R2_ENDPOINT),
+    { stdio: ['ignore', 'inherit', 'pipe'] });
+  await runAws([
+    's3api', 'head-object', '--bucket', R2_BUCKET,
+    '--key', `previews/${build.preview.sourceHash}/index.html`,
+    '--endpoint-url', R2_ENDPOINT,
+  ], { stdio: ['ignore', 'inherit', 'pipe'] });
 }
 
 function setChanged() {
@@ -129,10 +238,48 @@ async function main() {
         }
         await downloadTo(f.url, dest);
       }
-      uploadFolderToR2(dir, folder);
-      verifyR2(folder, all.map((f) => f.filename));
-      const names = listZipEntries(fs.readFileSync(path.join(dir, att.zips[0].filename)));
-      newEntries.push(buildProjectEntry({ msg, folder, type: classify(names), entryHtml: pickEntryHtml(names), attachments: att }));
+      await uploadFolderToR2(dir, folder);
+      await verifyR2(folder, all.map((f) => f.filename));
+
+      const zipPath = path.join(dir, att.zips[0].filename);
+      const zipBuffer = fs.readFileSync(zipPath);
+      let inspection = null;
+      let build;
+      let stage = 'archive';
+      try {
+        inspection = inspectTemplateArchive(zipBuffer);
+        validateArchiveRecords(inspection.records);
+        const projectDir = path.join(tmp, 'source');
+        extractValidatedArchive(zipPath, projectDir, inspection.records);
+        stage = 'build';
+        build = process.env.PREVIEW_BUILD_ENABLED === 'false' && BUILDABLE_RUNTIMES.has(inspection.runtime)
+          ? disabledBuild(inspection, zipBuffer)
+          : await buildStaticPreview({
+            inspection,
+            zipBuffer,
+            projectDir: path.join(projectDir, inspection.root),
+            cacheDir: path.join(os.tmpdir(), 'codegrid-npm-cache'),
+          });
+
+        if (build.preview.status === 'ready') {
+          stage = 'artifact';
+          await uploadReadyArtifact(build);
+        }
+      } catch (error) {
+        const failureCode = stage === 'archive' ? archiveFailureCode(error) : 'build-failed';
+        const runtime = inspection?.runtime ?? 'unsupported';
+        build = unavailableBuild(zipBuffer, runtime, failureCode);
+        console.error(`[PREVIEW] ${folder}: ${failureCode}: ${error.message}`);
+      }
+
+      newEntries.push(buildProjectEntry({
+        msg,
+        folder,
+        runtime: inspection?.runtime ?? 'unsupported',
+        preview: build.preview,
+        entryHtml: pickEntryHtml(inspection?.names ?? []),
+        attachments: att,
+      }));
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

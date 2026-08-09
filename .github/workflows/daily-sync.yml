@@ -16,8 +16,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Check preview pipeline prerequisites
+        run: |
+          docker --version
+          unzip -v | head -1
+          aws --version
       - name: Run unit tests
-        run: node --test scripts/sync-lib.test.mjs
+        run: npm run test:pipeline
       - name: Sync new posts
         id: sync
         env:
@@ -27,6 +32,7 @@ jobs:
           CHANNEL_ID: "1048241543477215275"
           R2_ENDPOINT: "https://c43c4f2af4941428dc86d37bffcb7800.r2.cloudflarestorage.com"
           R2_BUCKET: "codegrid-gallery"
+          PREVIEW_BUILD_ENABLED: "true"
         run: node scripts/ci-sync.mjs
       - name: Commit & push if changed
         if: steps.sync.outputs.changed == 'true'

@@ -3,7 +3,28 @@ import assert from 'node:assert/strict';
 import {
   sanitizeFilename, folderNameForMessage, extractAttachments, classify, pickEntryHtml,
   slug, prettyTitle, pickThumbnail, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
+  artifactUploadArgs, retryDelayMs,
 } from './sync-lib.mjs';
+
+test('artifactUploadArgs sets immutable cache and content-addressed prefix', () => {
+  const args = artifactUploadArgs(
+    'C:/tmp/dist',
+    'sha256:abc',
+    'codegrid-gallery',
+    'https://r2.example',
+  );
+  assert.deepEqual(args, [
+    's3', 'cp', 'C:/tmp/dist', 's3://codegrid-gallery/previews/sha256:abc',
+    '--recursive', '--cache-control', 'public,max-age=31536000,immutable',
+    '--endpoint-url', 'https://r2.example',
+  ]);
+});
+
+test('retryDelayMs honors Retry-After and adds bounded exponential jitter', () => {
+  assert.equal(retryDelayMs(2, 7_000, () => 0), 7_000);
+  assert.equal(retryDelayMs(2, null, () => 0), 4_000);
+  assert.equal(retryDelayMs(2, null, () => 1), 5_000);
+});
 
 test('sanitizeFilename replaces invalid chars and trims', () => {
   assert.equal(sanitizeFilename('  a/b:c?*d  '), 'a_b_c__d');

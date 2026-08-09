@@ -3,6 +3,25 @@
 
 import { projectTypeForRuntime } from './preview-classifier.mjs';
 
+const IMMUTABLE_CACHE_CONTROL = 'public,max-age=31536000,immutable';
+
+/** Build the AWS CLI arguments for a content-addressed preview artifact upload. */
+export function artifactUploadArgs(localDir, sourceHash, bucket, endpoint) {
+  return [
+    's3', 'cp', localDir, `s3://${bucket}/previews/${sourceHash}`,
+    '--recursive', '--cache-control', IMMUTABLE_CACHE_CONTROL,
+    '--endpoint-url', endpoint,
+  ];
+}
+
+/** Delay for retry attempt 0..n, preferring an upstream Retry-After value when present. */
+export function retryDelayMs(attempt, retryAfterMs, random = Math.random) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return retryAfterMs;
+  const exponential = Math.min(30_000, 1_000 * (2 ** Math.max(0, attempt)));
+  const jitter = Math.round(Math.min(1, Math.max(0, random())) * 1_000);
+  return exponential + jitter;
+}
+
 /** Replace filesystem-invalid characters with '_', then trim. Mirrors download_codegrid.py. */
 export function sanitizeFilename(name) {
   return name.replace(/[<>:"\/\\|?*]/g, '_').trim();

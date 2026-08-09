@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:pipeline": "node --test scripts/preview-classifier.test.mjs scripts/preview-builder.test.mjs scripts/sync-lib.test.mjs lib/preview.test.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

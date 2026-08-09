@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: preview-backfill
+  group: preview-index-writer
   cancel-in-progress: false
 
 jobs:

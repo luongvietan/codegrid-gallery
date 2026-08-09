@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write               # commit + push via GITHUB_TOKEN
 concurrency:
-  group: daily-sync
+  group: preview-index-writer
   cancel-in-progress: false
 jobs:
   sync:

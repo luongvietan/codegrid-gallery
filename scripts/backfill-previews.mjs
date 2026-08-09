@@ -12,13 +12,19 @@ import {
   projectTypeForRuntime,
   validateArchiveRecords,
 } from './preview-classifier.mjs';
-import { BUILDER_VERSION, buildStaticPreview } from './preview-builder.mjs';
 import {
-  artifactUploadArgs,
+  BUILDER_VERSION,
+  buildStaticPreview,
+  isStaticBuildRuntime,
+  reusedStaticPreview,
+  sourceHash,
+} from './preview-builder.mjs';
+import {
   awsInvocationEnv,
   pickEntryHtml,
   retryDelayMs,
 } from './sync-lib.mjs';
+import { resolveStaticPreviewArtifact } from './preview-artifacts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_PATH = path.join(ROOT, 'data', 'index.json');
@@ -186,17 +192,6 @@ function extractValidatedArchive(zipPath, extractionDirectory, inspection) {
   });
 }
 
-async function uploadReadyArtifact(build, bucket, endpoint) {
-  await runAws(artifactUploadArgs(build.outputDir, build.preview.sourceHash, bucket, endpoint), {
-    stdio: ['ignore', 'inherit', 'pipe'],
-  });
-  await runAws([
-    's3api', 'head-object', '--bucket', bucket,
-    '--key', `previews/${build.preview.sourceHash}/index.html`,
-    '--endpoint-url', endpoint,
-  ], { stdio: ['ignore', 'ignore', 'pipe'] });
-}
-
 async function processProject(project, bucket, endpoint) {
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'codegrid-backfill-'));
   const zipPath = path.join(temporaryDirectory, 'source.zip');
@@ -217,22 +212,24 @@ async function processProject(project, bucket, endpoint) {
     }
 
     try {
-      build = await buildStaticPreview({
+      const buildOptions = {
         inspection,
         zipBuffer,
         projectDir: path.join(temporaryDirectory, 'source', inspection.root),
         cacheDir: path.join(os.tmpdir(), 'codegrid-npm-cache'),
-      });
+      };
+      build = isStaticBuildRuntime(inspection.runtime)
+        ? await resolveStaticPreviewArtifact({
+          sourceHash: sourceHash(zipBuffer, inspection.runtime),
+          reusedBuild: reusedStaticPreview(inspection, zipBuffer),
+          build: () => buildStaticPreview(buildOptions),
+          bucket,
+          endpoint,
+          runAws,
+        })
+        : await buildStaticPreview(buildOptions);
     } catch (error) {
       throw taggedError('build-failed', error, inspection);
-    }
-
-    if (build.preview.status === 'ready') {
-      try {
-        await uploadReadyArtifact(build, bucket, endpoint);
-      } catch (error) {
-        throw taggedError('artifact-upload-failed', error, inspection, build.preview.sourceHash);
-      }
     }
 
     return {

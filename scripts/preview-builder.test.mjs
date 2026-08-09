@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { buildStaticPreview, dockerInvocation, sourceHash } from './preview-builder.mjs';
+import { buildStaticPreview, CONTAINER_IMAGE, dockerInvocation, sourceHash } from './preview-builder.mjs';
 
 const paths = {
   projectDir: 'C:\\preview\\project',
@@ -75,9 +75,10 @@ test('install container can use the shared npm cache and disables lifecycle scri
 
 test('CRA build sets a relative public URL inside the container', () => {
   const args = dockerInvocation('build', craInspection, paths).args;
-  const imageIndex = args.indexOf('node:20-bookworm-slim');
+  const imageIndex = args.indexOf(CONTAINER_IMAGE);
 
   assert.deepEqual(args.slice(imageIndex - 2, imageIndex), ['-e', 'PUBLIC_URL=.']);
+  assert.match(CONTAINER_IMAGE, /^node:20\.19\.4-bookworm-slim@sha256:[a-f0-9]{64}$/);
 });
 
 test('Vite output uses a relative base', () => {
@@ -105,8 +106,8 @@ test('builder installs then builds and returns a ready manifest', async (t) => {
   assert.equal(result.preview.mode, 'static');
   assert.equal(result.preview.status, 'ready');
   assert.equal(result.preview.entry, 'index.html');
-  assert.equal(result.preview.sourceHash, 'sha256:bf5cb39ef4d55f115005e932bbb39b533d7205f6096aa07b8bcc80fae613ad68');
-  assert.equal(result.preview.artifactBase, 'previews/sha256:bf5cb39ef4d55f115005e932bbb39b533d7205f6096aa07b8bcc80fae613ad68/');
+  assert.equal(result.preview.sourceHash, 'sha256:fb2a4a08b7f102b9e1fa84505082195dc01f5e63992d75487cca4b667e664c90');
+  assert.equal(result.preview.artifactBase, 'previews/sha256:fb2a4a08b7f102b9e1fa84505082195dc01f5e63992d75487cca4b667e664c90/');
   assert.equal(result.outputDir, join(outputPaths.projectDir, 'dist'));
 });
 
@@ -261,6 +262,82 @@ test('HTML output with a symlink cannot become upload-ready', async (t) => {
   assert.notEqual(result.preview.status, 'ready');
   assert.equal(result.preview.failureCode, 'unsafe-output');
   assert.equal(result.outputDir, null);
+});
+
+test('HTML preview remains legacy-ready without exposing an upload directory', async (t) => {
+  const temporaryDir = mkdtempSync(join(tmpdir(), 'preview-builder-html-ready-'));
+  t.after(() => rmSync(temporaryDir, { recursive: true, force: true }));
+  writeFileSync(join(temporaryDir, 'index.html'), '<h1>legacy</h1>');
+
+  const result = await buildStaticPreview({
+    inspection: { runtime: 'html' },
+    zipBuffer: Buffer.from('html source'),
+    projectDir: temporaryDir,
+    cacheDir: join(temporaryDir, 'unused-cache'),
+  });
+
+  assert.equal(result.preview.mode, 'html');
+  assert.equal(result.preview.status, 'ready');
+  assert.equal(result.outputDir, null);
+});
+
+test('builder rejects static output whose file count exceeds the artifact budget', async (t) => {
+  const outputPaths = createViteOutput(t, 'preview-builder-file-budget-');
+  writeFileSync(join(outputPaths.projectDir, 'dist', 'app.js'), 'x');
+
+  const result = await buildStaticPreview({
+    inspection: viteInspection,
+    zipBuffer: Buffer.from('too many artifact files'),
+    ...outputPaths,
+    artifactLimits: { maxFiles: 1, maxBytes: 1024 },
+    runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+
+  assert.equal(result.outputDir, null);
+  assert.equal(result.preview.failureCode, 'artifact-too-large');
+});
+
+test('builder rejects static output whose bytes exceed the artifact budget', async (t) => {
+  const outputPaths = createViteOutput(t, 'preview-builder-byte-budget-');
+
+  const result = await buildStaticPreview({
+    inspection: viteInspection,
+    zipBuffer: Buffer.from('artifact too large'),
+    ...outputPaths,
+    artifactLimits: { maxFiles: 10, maxBytes: 5 },
+    runProcess: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+
+  assert.equal(result.outputDir, null);
+  assert.equal(result.preview.failureCode, 'artifact-too-large');
+});
+
+test('project storage quota terminates and cleans the active build container', async () => {
+  const calls = [];
+  let finishBuild;
+  const result = await buildStaticPreview({
+    inspection: viteInspection,
+    zipBuffer: Buffer.from('storage flood'),
+    ...paths,
+    createContainerName: (phase) => `codegallery-${phase}-quota-test`,
+    projectStorageLimits: { maxFiles: 5, maxBytes: 100 },
+    storagePollIntervalMs: 1,
+    measureProjectStorage: (_projectDir, phase) => phase === 'build'
+      ? { fileCount: 6, totalBytes: 1 }
+      : { fileCount: 1, totalBytes: 1 },
+    runProcess: async (invocation) => {
+      calls.push(invocation);
+      if (invocation.phase === 'build') {
+        return new Promise((resolve) => { finishBuild = resolve; });
+      }
+      if (invocation.phase === 'cleanup') finishBuild?.({ code: 137, stdout: '', stderr: 'terminated' });
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+
+  assert.equal(result.preview.failureCode, 'build-storage-limit');
+  assert.deepEqual(calls.map(({ phase }) => phase), ['install', 'build', 'cleanup']);
+  assert.deepEqual(calls[2].args, ['rm', '-f', 'codegallery-build-quota-test']);
 });
 
 test('timeout forces removal of the named container', async () => {

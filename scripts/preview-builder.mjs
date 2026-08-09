@@ -4,9 +4,17 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'nod
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
-export const BUILDER_VERSION = 1;
+export const BUILDER_VERSION = 2;
+export const CONTAINER_IMAGE = 'node:20.19.4-bookworm-slim@sha256:a25e59a5562406b0a4f34ce94ccad6c3902dcf3269b40e1fe12d881090c6f9be';
+export const DEFAULT_ARTIFACT_LIMITS = {
+  maxFiles: 25_000,
+  maxBytes: 250 * 1024 * 1024,
+};
+export const DEFAULT_PROJECT_STORAGE_LIMITS = {
+  maxFiles: 200_000,
+  maxBytes: 2 * 1024 * 1024 * 1024,
+};
 
-const CONTAINER_IMAGE = 'node:20-bookworm-slim';
 const CONTAINER_LIMITS = ['--memory=2g', '--cpus=2', '--pids-limit=256'];
 const MAX_LOG_BYTES = 64 * 1024;
 const PUBLIC_LOG_BYTES = 4 * 1024;
@@ -15,6 +23,7 @@ const PHASE_TIMEOUTS = {
   build: 300_000,
 };
 const CLEANUP_TIMEOUT = 30_000;
+const STORAGE_POLL_INTERVAL = 1_000;
 const execFileAsync = promisify(execFile);
 
 function defaultContainerName(phase) {
@@ -121,12 +130,51 @@ function resolvedPathIsInside(root, candidate) {
     || (!isAbsolute(relativePath) && relativePath !== '..' && !relativePath.startsWith(`..${sep}`));
 }
 
-function validateOutputDirectory(outputDir) {
+function artifactBudgetError(message) {
+  const error = new Error(message);
+  error.code = 'ARTIFACT_BUDGET_EXCEEDED';
+  return error;
+}
+
+function validatedLimits(limits, label) {
+  if (!limits || !Number.isSafeInteger(limits.maxFiles) || limits.maxFiles < 1
+    || !Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1) {
+    throw new Error(`${label} limits must be positive safe integers`);
+  }
+  return limits;
+}
+
+function measureDirectory(root) {
+  const usage = { fileCount: 0, totalBytes: 0 };
+  if (!existsSync(root)) return usage;
+
+  function visit(candidate) {
+    const stat = lstatSync(candidate);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      for (const name of readdirSync(candidate)) visit(join(candidate, name));
+      return;
+    }
+    usage.fileCount += 1;
+    usage.totalBytes += stat.size;
+  }
+
+  visit(root);
+  return usage;
+}
+
+function exceedsLimits(usage, limits) {
+  return usage.fileCount > limits.maxFiles || usage.totalBytes > limits.maxBytes;
+}
+
+function validateOutputDirectory(outputDir, limits = DEFAULT_ARTIFACT_LIMITS) {
   const rootStat = lstatSync(outputDir);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
     throw new Error('Preview output root must be a regular directory');
   }
   const resolvedRoot = realpathSync(outputDir);
+
+  const usage = { fileCount: 0, totalBytes: 0 };
+  const bounded = limits ? validatedLimits(limits, 'Artifact') : null;
 
   function visit(candidate) {
     const stat = lstatSync(candidate);
@@ -137,10 +185,17 @@ function validateOutputDirectory(outputDir) {
     }
     if (stat.isDirectory()) {
       for (const name of readdirSync(candidate)) visit(join(candidate, name));
+    } else if (stat.isFile()) {
+      usage.fileCount += 1;
+      usage.totalBytes += stat.size;
+      if (bounded && exceedsLimits(usage, bounded)) {
+        throw artifactBudgetError('Preview output exceeds the file-count or total-byte limit');
+      }
     }
   }
 
   visit(outputDir);
+  return usage;
 }
 
 function previewManifest(inspection, zipBuffer, overrides) {
@@ -175,6 +230,41 @@ function fallbackResult(inspection, zipBuffer, status, log = '') {
   };
 }
 
+async function cleanupContainer(containerName, runProcess) {
+  try {
+    const cleanup = await runProcess({
+      phase: 'cleanup',
+      file: 'docker',
+      args: ['rm', '-f', containerName],
+      timeout: CLEANUP_TIMEOUT,
+      maxBuffer: MAX_LOG_BYTES,
+      env: hostEnvironment(),
+    });
+    return publicLog([cleanup?.stdout, cleanup?.stderr]);
+  } catch (error) {
+    return publicLog([error?.stdout, error?.stderr, error?.message]);
+  }
+}
+
+async function monitorProjectStorage(phase, paths, isStopped) {
+  while (!isStopped()) {
+    let usage;
+    try {
+      usage = paths.measureProjectStorage(paths.projectDir, phase);
+    } catch (error) {
+      return { exceeded: true, log: `Unable to measure project storage: ${error?.message ?? error}` };
+    }
+    if (exceedsLimits(usage, paths.projectStorageLimits)) {
+      return {
+        exceeded: true,
+        log: `Project storage limit exceeded (${usage.fileCount} files, ${usage.totalBytes} bytes)`,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, paths.storagePollIntervalMs));
+  }
+  return { exceeded: false, log: '' };
+}
+
 async function runPhase(phase, inspection, paths, runProcess) {
   const containerName = validateContainerName(paths.createContainerName(phase));
   const invocation = {
@@ -184,34 +274,38 @@ async function runPhase(phase, inspection, paths, runProcess) {
     maxBuffer: MAX_LOG_BYTES,
     env: hostEnvironment(),
   };
-  let result;
-  try {
-    const processResult = await runProcess(invocation);
-    result = {
-      code: processResult?.code === undefined ? 0 : processResult.code,
-      log: publicLog([processResult?.stdout, processResult?.stderr]),
-    };
-  } catch (error) {
-    result = {
-      code: typeof error?.code === 'number' ? error.code : 1,
-      log: publicLog([error?.stdout, error?.stderr, error?.message]),
+  let stopped = false;
+  const processOutcome = Promise.resolve()
+    .then(() => runProcess(invocation))
+    .then((processResult) => ({
+      kind: 'process',
+      result: {
+        code: processResult?.code === undefined ? 0 : processResult.code,
+        log: publicLog([processResult?.stdout, processResult?.stderr]),
+      },
+    }), (error) => ({
+      kind: 'process',
+      result: {
+        code: typeof error?.code === 'number' ? error.code : 1,
+        log: publicLog([error?.stdout, error?.stderr, error?.message]),
+      },
+    }));
+  const storageOutcome = monitorProjectStorage(phase, paths, () => stopped)
+    .then((result) => ({ kind: 'storage', result }));
+  const outcome = await Promise.race([processOutcome, storageOutcome]);
+  stopped = true;
+
+  if (outcome.kind === 'storage' && outcome.result.exceeded) {
+    const cleanupLog = await cleanupContainer(containerName, runProcess);
+    return {
+      code: 1,
+      failureCode: 'build-storage-limit',
+      log: publicLog([outcome.result.log, cleanupLog]),
     };
   }
+  const result = outcome.result;
   if (result.code !== 0) {
-    let cleanupLog = '';
-    try {
-      const cleanup = await runProcess({
-        phase: 'cleanup',
-        file: 'docker',
-        args: ['rm', '-f', containerName],
-        timeout: CLEANUP_TIMEOUT,
-        maxBuffer: MAX_LOG_BYTES,
-        env: hostEnvironment(),
-      });
-      cleanupLog = publicLog([cleanup?.stdout, cleanup?.stderr]);
-    } catch (error) {
-      cleanupLog = publicLog([error?.stdout, error?.stderr, error?.message]);
-    }
+    const cleanupLog = await cleanupContainer(containerName, runProcess);
     return {
       code: result.code,
       log: publicLog([result.log, cleanupLog]),
@@ -233,6 +327,10 @@ export async function buildStaticPreview(options) {
     outputExists = existsSync,
     createContainerName = defaultContainerName,
     containerUser = defaultContainerUser(),
+    artifactLimits = DEFAULT_ARTIFACT_LIMITS,
+    projectStorageLimits = DEFAULT_PROJECT_STORAGE_LIMITS,
+    storagePollIntervalMs = STORAGE_POLL_INTERVAL,
+    measureProjectStorage = measureDirectory,
   } = options;
 
   if (inspection.runtime === 'nextjs') {
@@ -243,13 +341,13 @@ export async function buildStaticPreview(options) {
   }
   if (inspection.runtime === 'html') {
     try {
-      validateOutputDirectory(projectDir);
+      validateOutputDirectory(projectDir, null);
     } catch (error) {
       return fallbackResult(inspection, zipBuffer, 'unsafe-output', error?.message);
     }
     return {
       status: 'ready',
-      outputDir: projectDir,
+      outputDir: null,
       preview: previewManifest(inspection, zipBuffer, {
         mode: 'html',
         entry: 'index.html',
@@ -259,7 +357,15 @@ export async function buildStaticPreview(options) {
     };
   }
 
-  const paths = { projectDir, cacheDir, createContainerName, containerUser };
+  const paths = {
+    projectDir,
+    cacheDir,
+    createContainerName,
+    containerUser,
+    projectStorageLimits: validatedLimits(projectStorageLimits, 'Project storage'),
+    storagePollIntervalMs,
+    measureProjectStorage,
+  };
   try {
     mkdirSync(cacheDir, { recursive: true });
   } catch (error) {
@@ -267,19 +373,20 @@ export async function buildStaticPreview(options) {
   }
   const install = await runPhase('install', inspection, paths, runProcess);
   if (install.code !== 0) {
-    return fallbackResult(inspection, zipBuffer, 'install-failed', install.log);
+    return fallbackResult(inspection, zipBuffer, install.failureCode ?? 'install-failed', install.log);
   }
 
   const build = await runPhase('build', inspection, paths, runProcess);
   const log = publicLog([install.log, build.log]);
   const outputDir = join(projectDir, inspection.runtime === 'cra' ? 'build' : 'dist');
   if (build.code !== 0 || !outputExists(outputDir)) {
-    return fallbackResult(inspection, zipBuffer, 'build-failed', log);
+    return fallbackResult(inspection, zipBuffer, build.failureCode ?? 'build-failed', log);
   }
   try {
-    validateOutputDirectory(outputDir);
+    validateOutputDirectory(outputDir, artifactLimits);
   } catch (error) {
-    return fallbackResult(inspection, zipBuffer, 'unsafe-output', publicLog([log, error?.message]));
+    const failureCode = error?.code === 'ARTIFACT_BUDGET_EXCEEDED' ? 'artifact-too-large' : 'unsafe-output';
+    return fallbackResult(inspection, zipBuffer, failureCode, publicLog([log, error?.message]));
   }
 
   return {
@@ -292,4 +399,21 @@ export async function buildStaticPreview(options) {
     }),
     log,
   };
+}
+
+export function reusedStaticPreview(inspection, zipBuffer) {
+  return {
+    status: 'ready',
+    outputDir: null,
+    preview: previewManifest(inspection, zipBuffer, {
+      mode: 'static',
+      entry: 'index.html',
+      status: 'ready',
+    }),
+    log: '',
+  };
+}
+
+export function isStaticBuildRuntime(runtime) {
+  return runtime === 'vite-vanilla' || runtime === 'vite-react' || runtime === 'cra';
 }

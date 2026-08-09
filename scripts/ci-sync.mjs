@@ -6,11 +6,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
-  artifactUploadArgs, awsInvocationEnv, retryDelayMs, folderNameForMessage, extractAttachments,
+  awsInvocationEnv, retryDelayMs, folderNameForMessage, extractAttachments,
   pickEntryHtml, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
 } from './sync-lib.mjs';
 import { inspectTemplateArchive, validateArchiveRecords } from './preview-classifier.mjs';
-import { BUILDER_VERSION, buildStaticPreview, sourceHash } from './preview-builder.mjs';
+import {
+  BUILDER_VERSION,
+  buildStaticPreview,
+  isStaticBuildRuntime,
+  reusedStaticPreview,
+  sourceHash,
+} from './preview-builder.mjs';
+import { resolveStaticPreviewArtifact } from './preview-artifacts.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX_PATH = path.join(ROOT, 'data', 'index.json');
@@ -19,7 +26,6 @@ const {
   DISCORD_TOKEN, CHANNEL_ID, R2_ENDPOINT, R2_BUCKET,
 } = process.env;
 const MAX_ATTEMPTS = 5;
-const BUILDABLE_RUNTIMES = new Set(['vite-vanilla', 'vite-react', 'cra']);
 
 function requireEnv() {
   const missing = ['DISCORD_TOKEN', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'CHANNEL_ID', 'R2_ENDPOINT', 'R2_BUCKET']
@@ -184,16 +190,6 @@ function archiveFailureCode(error) {
     : 'archive-invalid';
 }
 
-async function uploadReadyArtifact(build) {
-  await runAws(artifactUploadArgs(build.outputDir, build.preview.sourceHash, R2_BUCKET, R2_ENDPOINT),
-    { stdio: ['ignore', 'inherit', 'pipe'] });
-  await runAws([
-    's3api', 'head-object', '--bucket', R2_BUCKET,
-    '--key', `previews/${build.preview.sourceHash}/index.html`,
-    '--endpoint-url', R2_ENDPOINT,
-  ], { stdio: ['ignore', 'inherit', 'pipe'] });
-}
-
 function setChanged() {
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, 'changed=true\n');
 }
@@ -245,18 +241,26 @@ async function main() {
         const projectDir = path.join(tmp, 'source');
         extractValidatedArchive(zipPath, projectDir, inspection.records);
         stage = 'build';
-        build = process.env.PREVIEW_BUILD_ENABLED === 'false' && BUILDABLE_RUNTIMES.has(inspection.runtime)
-          ? disabledBuild(inspection, zipBuffer)
-          : await buildStaticPreview({
-            inspection,
-            zipBuffer,
-            projectDir: path.join(projectDir, inspection.root),
-            cacheDir: path.join(os.tmpdir(), 'codegrid-npm-cache'),
-          });
-
-        if (build.preview.status === 'ready') {
+        const buildOptions = {
+          inspection,
+          zipBuffer,
+          projectDir: path.join(projectDir, inspection.root),
+          cacheDir: path.join(os.tmpdir(), 'codegrid-npm-cache'),
+        };
+        if (process.env.PREVIEW_BUILD_ENABLED === 'false' && isStaticBuildRuntime(inspection.runtime)) {
+          build = disabledBuild(inspection, zipBuffer);
+        } else if (isStaticBuildRuntime(inspection.runtime)) {
           stage = 'artifact';
-          await uploadReadyArtifact(build);
+          build = await resolveStaticPreviewArtifact({
+            sourceHash: sourceHash(zipBuffer, inspection.runtime),
+            reusedBuild: reusedStaticPreview(inspection, zipBuffer),
+            build: () => buildStaticPreview(buildOptions),
+            bucket: R2_BUCKET,
+            endpoint: R2_ENDPOINT,
+            runAws,
+          });
+        } else {
+          build = await buildStaticPreview(buildOptions);
         }
       } catch (error) {
         const failureCode = stage === 'archive' ? archiveFailureCode(error) : 'build-failed';

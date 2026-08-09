@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
 export const BUILDER_VERSION = 1;
@@ -14,7 +14,34 @@ const PHASE_TIMEOUTS = {
   install: 480_000,
   build: 300_000,
 };
+const CLEANUP_TIMEOUT = 30_000;
 const execFileAsync = promisify(execFile);
+
+function defaultContainerName(phase) {
+  return `codegallery-preview-${phase}-${randomUUID()}`;
+}
+
+function validateContainerName(containerName) {
+  if (typeof containerName !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.-]{1,127}$/.test(containerName)) {
+    throw new Error('Invalid Docker container name');
+  }
+  return containerName;
+}
+
+function defaultContainerUser() {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 0;
+  const gid = typeof process.getgid === 'function' ? process.getgid() : 0;
+  return Number.isInteger(uid) && uid > 0 && Number.isInteger(gid) && gid > 0
+    ? `${uid}:${gid}`
+    : '1000:1000';
+}
+
+function validateContainerUser(containerUser) {
+  if (typeof containerUser !== 'string' || !/^[1-9]\d*:[1-9]\d*$/.test(containerUser)) {
+    throw new Error('Docker container user must be a non-root numeric uid:gid');
+  }
+  return containerUser;
+}
 
 export function sourceHash(zipBuffer, runtime, builderVersion = BUILDER_VERSION) {
   return `sha256:${createHash('sha256')
@@ -25,13 +52,19 @@ export function sourceHash(zipBuffer, runtime, builderVersion = BUILDER_VERSION)
 
 export function dockerInvocation(phase, inspection, paths) {
   const { projectDir, cacheDir } = paths;
+  const containerName = validateContainerName(paths.containerName ?? defaultContainerName(phase));
+  const containerUser = validateContainerUser(paths.containerUser ?? defaultContainerUser());
   const network = phase === 'install' ? ['--network=bridge'] : ['--network=none'];
   const mounts = phase === 'install'
-    ? ['-v', `${projectDir}:/workspace`, '-v', `${cacheDir}:/root/.npm`, '-w', '/workspace']
+    ? ['-v', `${projectDir}:/workspace`, '-v', `${cacheDir}:/npm-cache`, '-w', '/workspace']
     : ['-v', `${projectDir}:/workspace`, '-w', '/workspace'];
-  const environment = phase === 'build' && inspection.runtime === 'cra'
-    ? ['-e', 'PUBLIC_URL=.']
-    : [];
+  const environment = [
+    '-e',
+    'HOME=/tmp',
+    ...(phase === 'install'
+      ? ['-e', 'NPM_CONFIG_CACHE=/npm-cache']
+      : inspection.runtime === 'cra' ? ['-e', 'PUBLIC_URL=.'] : []),
+  ];
   const command = phase === 'install' ? inspection.installCommand : inspection.buildCommand;
 
   return {
@@ -39,6 +72,10 @@ export function dockerInvocation(phase, inspection, paths) {
     args: [
       'run',
       '--rm',
+      '--name',
+      containerName,
+      '--user',
+      containerUser,
       ...CONTAINER_LIMITS,
       ...network,
       ...mounts,
@@ -78,6 +115,34 @@ function publicLog(parts) {
   return tailBytes(tailBytes(parts.filter(Boolean).join('\n'), MAX_LOG_BYTES), PUBLIC_LOG_BYTES);
 }
 
+function resolvedPathIsInside(root, candidate) {
+  const relativePath = relative(root, candidate);
+  return relativePath === ''
+    || (!isAbsolute(relativePath) && relativePath !== '..' && !relativePath.startsWith(`..${sep}`));
+}
+
+function validateOutputDirectory(outputDir) {
+  const rootStat = lstatSync(outputDir);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error('Preview output root must be a regular directory');
+  }
+  const resolvedRoot = realpathSync(outputDir);
+
+  function visit(candidate) {
+    const stat = lstatSync(candidate);
+    if (stat.isSymbolicLink()) throw new Error('Preview output contains a symbolic link');
+    if (!stat.isDirectory() && !stat.isFile()) throw new Error('Preview output contains a special file');
+    if (!resolvedPathIsInside(resolvedRoot, realpathSync(candidate))) {
+      throw new Error('Preview output resolves outside its root');
+    }
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(candidate)) visit(join(candidate, name));
+    }
+  }
+
+  visit(outputDir);
+}
+
 function previewManifest(inspection, zipBuffer, overrides) {
   const hash = sourceHash(zipBuffer, inspection.runtime);
   return {
@@ -111,25 +176,51 @@ function fallbackResult(inspection, zipBuffer, status, log = '') {
 }
 
 async function runPhase(phase, inspection, paths, runProcess) {
+  const containerName = validateContainerName(paths.createContainerName(phase));
   const invocation = {
     phase,
-    ...dockerInvocation(phase, inspection, paths),
+    ...dockerInvocation(phase, inspection, { ...paths, containerName }),
     timeout: PHASE_TIMEOUTS[phase],
     maxBuffer: MAX_LOG_BYTES,
     env: hostEnvironment(),
   };
+  let result;
   try {
-    const result = await runProcess(invocation);
-    return {
-      code: result?.code ?? 0,
-      log: publicLog([result?.stdout, result?.stderr]),
+    const processResult = await runProcess(invocation);
+    result = {
+      code: processResult?.code === undefined ? 0 : processResult.code,
+      log: publicLog([processResult?.stdout, processResult?.stderr]),
     };
   } catch (error) {
-    return {
+    result = {
       code: typeof error?.code === 'number' ? error.code : 1,
       log: publicLog([error?.stdout, error?.stderr, error?.message]),
     };
   }
+  if (result.code !== 0) {
+    let cleanupLog = '';
+    try {
+      const cleanup = await runProcess({
+        phase: 'cleanup',
+        file: 'docker',
+        args: ['rm', '-f', containerName],
+        timeout: CLEANUP_TIMEOUT,
+        maxBuffer: MAX_LOG_BYTES,
+        env: hostEnvironment(),
+      });
+      cleanupLog = publicLog([cleanup?.stdout, cleanup?.stderr]);
+    } catch (error) {
+      cleanupLog = publicLog([error?.stdout, error?.stderr, error?.message]);
+    }
+    return {
+      code: result.code,
+      log: publicLog([result.log, cleanupLog]),
+    };
+  }
+  return {
+    code: result.code,
+    log: result.log,
+  };
 }
 
 export async function buildStaticPreview(options) {
@@ -140,6 +231,8 @@ export async function buildStaticPreview(options) {
     cacheDir,
     runProcess = defaultRunProcess,
     outputExists = existsSync,
+    createContainerName = defaultContainerName,
+    containerUser = defaultContainerUser(),
   } = options;
 
   if (inspection.runtime === 'nextjs') {
@@ -161,7 +254,12 @@ export async function buildStaticPreview(options) {
     };
   }
 
-  const paths = { projectDir, cacheDir };
+  const paths = { projectDir, cacheDir, createContainerName, containerUser };
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+  } catch (error) {
+    return fallbackResult(inspection, zipBuffer, 'install-failed', error?.message);
+  }
   const install = await runPhase('install', inspection, paths, runProcess);
   if (install.code !== 0) {
     return fallbackResult(inspection, zipBuffer, 'install-failed', install.log);
@@ -172,6 +270,11 @@ export async function buildStaticPreview(options) {
   const outputDir = join(projectDir, inspection.runtime === 'cra' ? 'build' : 'dist');
   if (build.code !== 0 || !outputExists(outputDir)) {
     return fallbackResult(inspection, zipBuffer, 'build-failed', log);
+  }
+  try {
+    validateOutputDirectory(outputDir);
+  } catch (error) {
+    return fallbackResult(inspection, zipBuffer, 'unsafe-output', publicLog([log, error?.message]));
   }
 
   return {

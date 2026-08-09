@@ -126,9 +126,9 @@ Failure details stored in the public index are normalized codes and short messag
 
 ### 5. Static Preview Loader
 
-The gallery opens a static artifact entry in the existing sandboxed iframe. Requests resolve through the same-origin asset proxy so local and production use the same URL contract.
+The gallery opens a static artifact entry from the fixed public R2 origin in a sandboxed iframe. Local and production therefore use the same artifact URL without consuming a Vercel Function invocation. Vite builds use a relative base and Create React App builds use `PUBLIC_URL=.` so their assets remain under the same content-addressed R2 prefix.
 
-The API proxy maps a preview path to the fixed R2 origin and preserves Range requests, content types, and immutable cache headers. The iframe remains sandboxed and receives only the permissions required by the template.
+The separate R2 origin isolates template cookies, storage, and DOM access from the gallery. R2 objects retain their content types and immutable cache headers. The iframe receives only the permissions required by the template.
 
 Static files are loaded lazily by the browser. Opening a preview no longer requires downloading source files, unused images, videos, or the package lockfile.
 
@@ -236,7 +236,7 @@ The UI shows the current phase and a useful recovery action. A failed static bui
 ### Integration tests
 
 - Build fixture projects for Vite vanilla, Vite React, CRA, static-compatible Next, and dynamic Next.
-- Upload artifacts to a temporary object prefix and serve them through the asset route.
+- Upload artifacts to a temporary object prefix and serve them from the public R2 origin.
 - Verify CSS, JavaScript, fonts, images, nested routes, and root-relative assets.
 - Verify a dynamic Next fixture is marked for WebContainer without failing the full sync.
 - Verify WebContainer progress, server-ready handling, process cleanup, and cache reuse.

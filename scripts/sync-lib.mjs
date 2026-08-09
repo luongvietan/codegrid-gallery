@@ -1,6 +1,8 @@
 // scripts/sync-lib.mjs
 // Pure helpers for the daily CI sync. No I/O — unit-tested in sync-lib.test.mjs.
 
+import { projectTypeForRuntime } from './preview-classifier.mjs';
+
 /** Replace filesystem-invalid characters with '_', then trim. Mirrors download_codegrid.py. */
 export function sanitizeFilename(name) {
   return name.replace(/[<>:"\/\\|?*]/g, '_').trim();
@@ -53,7 +55,7 @@ export function listZipEntries(buf) {
   return names;
 }
 
-/** Classify a zip's file list into 'nextjs' | 'react' | 'html'. Mirrors build-index.mjs. */
+/** Legacy filename-only classifier retained until ci-sync migrates to inspectTemplateArchive. */
 export function classify(names) {
   const real = names.map((n) => n.toLowerCase()).filter((n) => !n.startsWith('__macosx/'));
   if (real.some((n) => /(^|\/)next\.config\.(js|mjs|ts|cjs)$/.test(n))) return 'nextjs';
@@ -88,12 +90,14 @@ export function pickThumbnail(images) {
 }
 
 /** Build one index project entry (same shape build-index.mjs produces). */
-export function buildProjectEntry({ msg, folder, type, entryHtml, attachments }) {
+export function buildProjectEntry({ msg, folder, runtime, preview, type, entryHtml, attachments }) {
   return {
     id: slug(folder),
     folder,
     title: prettyTitle(folder),
-    type,
+    type: runtime ? projectTypeForRuntime(runtime) : type,
+    runtime,
+    preview,
     date: (msg.timestamp || '').slice(0, 10) || null,
     author: msg.author?.username ?? null,
     msgId: msg.id,

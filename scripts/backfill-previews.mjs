@@ -51,11 +51,16 @@ export function selectBackfillBatch(projects, limit) {
   return projects
     .filter((project) => project.preview?.status !== 'ready')
     .filter((project) => project.runtime !== 'nextjs' && project.type !== 'nextjs')
-    .map((project, position) => ({ project, position }))
+    .map((project, position) => ({
+      project,
+      position,
+      attemptPriority: project.preview == null ? 0 : 1,
+    }))
     .sort((left, right) => {
       const leftFolder = String(left.project.folder ?? '');
       const rightFolder = String(right.project.folder ?? '');
-      return (leftFolder < rightFolder ? -1 : leftFolder > rightFolder ? 1 : 0)
+      return left.attemptPriority - right.attemptPriority
+        || (leftFolder < rightFolder ? -1 : leftFolder > rightFolder ? 1 : 0)
         || left.position - right.position;
     })
     .slice(0, boundedLimit)

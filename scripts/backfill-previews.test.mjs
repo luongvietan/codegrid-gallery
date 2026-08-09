@@ -38,6 +38,31 @@ test('selectBackfillBatch uses stable folder order, skips known Next types, and 
   );
 });
 
+test('selectBackfillBatch advances untouched projects before retrying an earlier failed batch', () => {
+  let projects = [
+    { id: 'a', folder: 'a', type: 'react' },
+    { id: 'b', folder: 'b', type: 'react' },
+    { id: 'c', folder: 'c', type: 'react' },
+    { id: 'd', folder: 'd', type: 'react' },
+  ];
+
+  const firstBatch = selectBackfillBatch(projects, 2);
+  assert.deepEqual(firstBatch.map((project) => project.id), ['a', 'b']);
+  projects = mergeBackfillResults(projects, firstBatch.map((project) => ({
+    id: project.id,
+    preview: { status: 'build-failed', failureCode: 'build-failed' },
+  })));
+
+  const secondBatch = selectBackfillBatch(projects, 2);
+  assert.deepEqual(secondBatch.map((project) => project.id), ['c', 'd']);
+  projects = mergeBackfillResults(projects, secondBatch.map((project) => ({
+    id: project.id,
+    preview: { status: 'ready' },
+  })));
+
+  assert.deepEqual(selectBackfillBatch(projects, 2).map((project) => project.id), ['a', 'b']);
+});
+
 test('mergeBackfillResults preserves a failed project and continues', () => {
   const merged = mergeBackfillResults([{ id: 'a' }, { id: 'b' }], [
     { id: 'a', preview: { status: 'build-failed', failureCode: 'build-failed' } },

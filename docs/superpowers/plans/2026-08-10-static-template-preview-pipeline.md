@@ -72,7 +72,7 @@ Add table-driven tests that pass synthetic filenames plus parsed package content
 
 ```js
 test('classifyRuntime distinguishes the five supported profiles', () => {
-  assert.equal(classifyRuntime([], null), 'html');
+  assert.equal(classifyRuntime(['index.html'], null), 'html');
   assert.equal(classifyRuntime(['demo/package.json'], { dependencies: { vite: '^7.0.0' } }), 'vite-vanilla');
   assert.equal(classifyRuntime(['demo/package.json'], { dependencies: { vite: '^7.0.0', react: '^19.0.0' } }), 'vite-react');
   assert.equal(classifyRuntime(['demo/package.json'], { dependencies: { 'react-scripts': '5.0.1' } }), 'cra');
@@ -285,7 +285,7 @@ git commit -m "feat: define static preview manifest contracts"
 
 **Interfaces:**
 - Consumes: `ArchiveInspection` from Task 1 plus ZIP path and temporary directory.
-- Produces: `sourceHash(zipBuffer, inspection)`, `dockerInvocation(phase, inspection, paths)`, and `buildStaticPreview(options): Promise<BuildResult>`.
+- Produces: `sourceHash(zipBuffer, runtime, builderVersion?)`, `dockerInvocation(phase, inspection, paths)`, and `buildStaticPreview(options): Promise<BuildResult>`.
 - `BuildResult`: `{ status, outputDir, preview, log }`, with logs capped at 64 KiB.
 
 - [ ] **Step 1: Write failing source-hash and Docker isolation tests**
@@ -337,7 +337,9 @@ Construct Docker arguments without a host shell:
 
 ```js
 const limits = ['--memory=2g', '--cpus=2', '--pids-limit=256'];
-const mounts = ['-v', `${projectDir}:/workspace`, '-v', `${cacheDir}:/root/.npm`, '-w', '/workspace'];
+const mounts = phase === 'install'
+  ? ['-v', `${projectDir}:/workspace`, '-v', `${cacheDir}:/root/.npm`, '-w', '/workspace']
+  : ['-v', `${projectDir}:/workspace`, '-w', '/workspace'];
 const network = phase === 'install' ? ['--network=bridge'] : ['--network=none'];
 return { file: 'docker', args: ['run', '--rm', ...limits, ...network, ...mounts, 'node:20-bookworm-slim', ...command] };
 ```

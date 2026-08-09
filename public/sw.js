@@ -3,6 +3,7 @@
 // File được lưu trong Cache Storage (bền qua việc SW bị kill khi idle).
 
 const PREFIX = '__preview__/';
+const ROOT_PREFIX = '__root__/';
 const CACHE = 'codegrid-preview';
 
 const TYPES = {
@@ -51,9 +52,15 @@ self.addEventListener('message', (e) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const i = url.pathname.indexOf(PREFIX);
-  if (i === -1) return;
-  let rel = decodeURIComponent(url.pathname.slice(i + PREFIX.length)).replace(/^\/+/, '');
-  event.respondWith(serve(rel));
+  if (i !== -1) {
+    const rel = decodeURIComponent(url.pathname.slice(i + PREFIX.length)).replace(/^\/+/, '');
+    event.respondWith(serve(rel));
+    return;
+  }
+
+  if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
+  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+  event.respondWith(serveRootAliasOrNetwork(rel, event.request));
 });
 
 async function serve(rel) {
@@ -62,4 +69,10 @@ async function serve(rel) {
   if (!res && (rel === '' || rel.endsWith('/'))) res = await cache.match(keyFor(rel + 'index.html'));
   if (!res) return new Response('Not found in preview: ' + rel, { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
   return res;
+}
+
+async function serveRootAliasOrNetwork(rel, request) {
+  const cache = await caches.open(CACHE);
+  const res = await cache.match(keyFor(ROOT_PREFIX + rel));
+  return res || fetch(request);
 }

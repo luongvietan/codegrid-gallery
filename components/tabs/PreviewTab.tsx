@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Project } from '@/lib/types';
 import type { ExtractedZip } from '@/lib/zip';
 import { swSend } from '@/lib/sw-client';
+import { previewRootAliases } from '@/lib/preview-paths';
 
 function encodePath(s: string) { return s.split('/').map(encodeURIComponent).join('/'); }
 
@@ -25,6 +26,9 @@ export default function PreviewTab({ p, zip, onToast }: {
       const payload: Record<string, ArrayBuffer> = {};
       const transfer: Transferable[] = [];
       for (const [k, ab] of zip.files) { const c = ab.slice(0); payload[k] = c; transfer.push(c); }
+      for (const [alias, source] of previewRootAliases(zip.names, e)) {
+        payload[`__root__/${alias}`] = payload[source];
+      }
       try {
         await swSend({ type: 'load', files: payload }, transfer);
       } catch (err) {

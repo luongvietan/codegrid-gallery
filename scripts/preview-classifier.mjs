@@ -21,19 +21,30 @@ function inBounds(buffer, offset, length) {
 }
 
 function findEndOfCentralDirectory(zipBuffer) {
+  let eocdOffset = -1;
   for (let offset = zipBuffer.length - 22; offset >= 0 && offset >= zipBuffer.length - 22 - 65_535; offset--) {
-    if (zipBuffer.readUInt32LE(offset) === EOCD_SIGNATURE) return offset;
+    if (zipBuffer.readUInt32LE(offset) !== EOCD_SIGNATURE) continue;
+    const commentLength = zipBuffer.readUInt16LE(offset + 20);
+    if (offset + 22 + commentLength !== zipBuffer.length) continue;
+    if (eocdOffset >= 0) throw new Error('Ambiguous ZIP end-of-central-directory records');
+    eocdOffset = offset;
   }
-  throw new Error('ZIP end-of-central-directory record not found');
+  if (eocdOffset < 0) throw new Error('ZIP end-of-central-directory record not found');
+  return eocdOffset;
 }
 
 function readCentralDirectoryRecords(zipBuffer) {
   if (!Buffer.isBuffer(zipBuffer) || zipBuffer.length < 22) throw new Error('Invalid ZIP archive');
   const eocdOffset = findEndOfCentralDirectory(zipBuffer);
+  const diskNumber = zipBuffer.readUInt16LE(eocdOffset + 4);
+  const centralDirectoryDisk = zipBuffer.readUInt16LE(eocdOffset + 6);
+  const entriesOnDisk = zipBuffer.readUInt16LE(eocdOffset + 8);
   const entryCount = zipBuffer.readUInt16LE(eocdOffset + 10);
   const centralDirectorySize = zipBuffer.readUInt32LE(eocdOffset + 12);
   const centralDirectoryOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+  if (diskNumber !== 0 || centralDirectoryDisk !== 0 || entriesOnDisk !== entryCount) throw new Error('Unsupported multi-disk ZIP archive');
   if (!inBounds(zipBuffer, centralDirectoryOffset, centralDirectorySize)) throw new Error('Invalid ZIP central directory bounds');
+  if (centralDirectoryOffset + centralDirectorySize !== eocdOffset) throw new Error('Invalid ZIP central directory boundary');
   if (entryCount > MAX_ARCHIVE_ENTRIES) throw new Error(`ZIP archive has too many entries (maximum ${MAX_ARCHIVE_ENTRIES})`);
 
   const records = [];
@@ -64,6 +75,7 @@ function readCentralDirectoryRecords(zipBuffer) {
     });
     offset += recordLength;
   }
+  if (offset !== centralDirectoryEnd) throw new Error('ZIP central directory entry count does not match its declared size');
   return records;
 }
 

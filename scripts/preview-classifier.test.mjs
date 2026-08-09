@@ -8,7 +8,7 @@ import {
   validateArchiveRecords,
 } from './preview-classifier.mjs';
 
-function zip(entries) {
+function zip(entries, options = {}) {
   const localParts = [];
   const centralParts = [];
   let offset = 0;
@@ -55,12 +55,15 @@ function zip(entries) {
   }
 
   const central = Buffer.concat(centralParts);
-  const eocd = Buffer.alloc(22);
+  const comment = Buffer.from(options.comment || '');
+  const eocd = Buffer.alloc(22 + comment.length);
   eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(entries.length, 8);
-  eocd.writeUInt16LE(entries.length, 10);
-  eocd.writeUInt32LE(central.length, 12);
+  eocd.writeUInt16LE(options.entryCount ?? entries.length, 8);
+  eocd.writeUInt16LE(options.entryCount ?? entries.length, 10);
+  eocd.writeUInt32LE(options.centralDirectorySize ?? central.length, 12);
   eocd.writeUInt32LE(offset, 16);
+  eocd.writeUInt16LE(comment.length, 20);
+  comment.copy(eocd, 22);
   return Buffer.concat([...localParts, central, eocd]);
 }
 
@@ -107,6 +110,42 @@ test('inspection rejects a manifest whose actual inflated size exceeds its centr
   ]);
 
   assert.throws(() => inspectTemplateArchive(archive), /expanded size/i);
+});
+
+test('inspection ignores forged EOCD signatures in the real EOCD comment', () => {
+  const forgedEocd = Buffer.alloc(22);
+  forgedEocd.writeUInt32LE(0x06054b50, 0);
+  const archive = zip([
+    { name: '../escape.js', contents: 'unsafe' },
+  ], { comment: Buffer.concat([forgedEocd, Buffer.from('trailing comment data')]) });
+
+  assert.throws(() => inspectTemplateArchive(archive), /unsafe path/i);
+});
+
+test('inspection rejects structurally self-consistent forged EOCDs in a comment', () => {
+  const forgedEocd = Buffer.alloc(22);
+  forgedEocd.writeUInt32LE(0x06054b50, 0);
+  const tail = Buffer.from('tail');
+  const comment = Buffer.concat([forgedEocd, tail]);
+  const archive = zip([
+    { name: '../escape.js', contents: 'unsafe' },
+  ], { comment });
+  const realEocdOffset = archive.length - 22 - comment.length;
+  const forgedEocdOffset = realEocdOffset + 22;
+  archive.writeUInt32LE(forgedEocdOffset, forgedEocdOffset + 16);
+  archive.writeUInt16LE(tail.length, forgedEocdOffset + 20);
+
+  assert.throws(() => inspectTemplateArchive(archive), /ambiguous.*central-directory/i);
+});
+
+test('inspection rejects EOCD central-directory entry-count and size mismatches', () => {
+  const entries = [
+    { name: 'package.json', contents: JSON.stringify({ dependencies: { vite: '^7.0.0' } }) },
+    { name: '../escape.js', contents: 'unsafe' },
+  ];
+
+  assert.throws(() => inspectTemplateArchive(zip(entries, { entryCount: 1 })), /central directory/i);
+  assert.throws(() => inspectTemplateArchive(zip([entries[0]], { centralDirectorySize: 47 + Buffer.byteLength('package.json') })), /central directory/i);
 });
 
 test('inspection chooses the shallowest non-node_modules manifest and derives Vite commands', () => {

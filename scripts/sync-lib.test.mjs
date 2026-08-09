@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   sanitizeFilename, folderNameForMessage, extractAttachments, classify, pickEntryHtml,
   slug, prettyTitle, pickThumbnail, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
-  artifactUploadArgs, retryDelayMs,
+  artifactUploadArgs, awsInvocationEnv, retryDelayMs,
 } from './sync-lib.mjs';
 
 test('artifactUploadArgs sets immutable cache and content-addressed prefix', () => {
@@ -24,6 +24,28 @@ test('retryDelayMs honors Retry-After and adds bounded exponential jitter', () =
   assert.equal(retryDelayMs(2, 7_000, () => 0), 7_000);
   assert.equal(retryDelayMs(2, null, () => 0), 4_000);
   assert.equal(retryDelayMs(2, null, () => 1), 5_000);
+});
+
+test('awsInvocationEnv caps each CLI invocation to one internal attempt', () => {
+  const env = awsInvocationEnv({
+    PATH: '/usr/bin',
+    HOME: '/home/runner',
+    DISCORD_TOKEN: 'must-not-forward',
+    R2_ACCESS_KEY_ID: 'r2-key',
+    R2_SECRET_ACCESS_KEY: 'r2-secret',
+    AWS_MAX_ATTEMPTS: '99',
+    AWS_RETRY_MODE: 'adaptive',
+  });
+
+  assert.deepEqual(env, {
+    PATH: '/usr/bin',
+    HOME: '/home/runner',
+    AWS_ACCESS_KEY_ID: 'r2-key',
+    AWS_SECRET_ACCESS_KEY: 'r2-secret',
+    AWS_DEFAULT_REGION: 'auto',
+    AWS_MAX_ATTEMPTS: '1',
+    AWS_RETRY_MODE: 'standard',
+  });
 });
 
 test('sanitizeFilename replaces invalid chars and trims', () => {

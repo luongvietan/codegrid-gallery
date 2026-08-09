@@ -4,6 +4,7 @@
 import { projectTypeForRuntime } from './preview-classifier.mjs';
 
 const IMMUTABLE_CACHE_CONTROL = 'public,max-age=31536000,immutable';
+const AWS_ENV_ALLOWLIST = ['PATH', 'SystemRoot', 'HOME', 'USERPROFILE', 'TEMP', 'TMP', 'LANG', 'LC_ALL'];
 
 /** Build the AWS CLI arguments for a content-addressed preview artifact upload. */
 export function artifactUploadArgs(localDir, sourceHash, bucket, endpoint) {
@@ -20,6 +21,22 @@ export function retryDelayMs(attempt, retryAfterMs, random = Math.random) {
   const exponential = Math.min(30_000, 1_000 * (2 ** Math.max(0, attempt)));
   const jitter = Math.round(Math.min(1, Math.max(0, random())) * 1_000);
   return exponential + jitter;
+}
+
+/** Minimal AWS CLI environment with retries owned by the outer orchestration loop. */
+export function awsInvocationEnv(baseEnv) {
+  return {
+    ...Object.fromEntries(
+      AWS_ENV_ALLOWLIST
+        .filter((name) => typeof baseEnv[name] === 'string')
+        .map((name) => [name, baseEnv[name]]),
+    ),
+    AWS_ACCESS_KEY_ID: baseEnv.R2_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: baseEnv.R2_SECRET_ACCESS_KEY,
+    AWS_DEFAULT_REGION: 'auto',
+    AWS_MAX_ATTEMPTS: '1',
+    AWS_RETRY_MODE: 'standard',
+  };
 }
 
 /** Replace filesystem-invalid characters with '_', then trim. Mirrors download_codegrid.py. */

@@ -242,6 +242,11 @@ export async function buildStaticPreview(options) {
     return fallbackResult(inspection, zipBuffer, 'unsupported');
   }
   if (inspection.runtime === 'html') {
+    try {
+      validateOutputDirectory(projectDir);
+    } catch (error) {
+      return fallbackResult(inspection, zipBuffer, 'unsafe-output', error?.message);
+    }
     return {
       status: 'ready',
       outputDir: projectDir,

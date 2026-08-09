@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import {
-  artifactUploadArgs, retryDelayMs, folderNameForMessage, extractAttachments,
+  artifactUploadArgs, awsInvocationEnv, retryDelayMs, folderNameForMessage, extractAttachments,
   pickEntryHtml, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
 } from './sync-lib.mjs';
 import { inspectTemplateArchive, validateArchiveRecords } from './preview-classifier.mjs';
@@ -26,13 +26,6 @@ function requireEnv() {
     .filter((k) => !process.env[k]);
   if (missing.length) { console.error(`[ERROR] Missing env: ${missing.join(', ')}`); process.exit(1); }
 }
-
-const awsEnv = () => ({
-  ...process.env,
-  AWS_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
-  AWS_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
-  AWS_DEFAULT_REGION: 'auto',
-});
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -58,7 +51,7 @@ function isTransientAwsError(error) {
 async function runAws(args, options = {}) {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      return execFileSync('aws', args, { env: awsEnv(), ...options });
+      return execFileSync('aws', args, { env: awsInvocationEnv(process.env), ...options });
     } catch (error) {
       if (attempt === MAX_ATTEMPTS - 1 || !isTransientAwsError(error)) {
         if (error?.stderr) process.stderr.write(error.stderr);

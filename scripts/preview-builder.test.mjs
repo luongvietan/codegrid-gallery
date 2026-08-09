@@ -240,6 +240,29 @@ test('builder rejects a symlink artifact that resolves outside the output direct
   assert.equal(result.outputDir, null);
 });
 
+test('HTML output with a symlink cannot become upload-ready', async (t) => {
+  const temporaryDir = mkdtempSync(join(tmpdir(), 'preview-builder-html-output-'));
+  t.after(() => rmSync(temporaryDir, { recursive: true, force: true }));
+  const projectDir = join(temporaryDir, 'project');
+  const outsideDir = join(temporaryDir, 'outside');
+  mkdirSync(projectDir, { recursive: true });
+  mkdirSync(outsideDir);
+  writeFileSync(join(projectDir, 'index.html'), '<h1>safe</h1>');
+  writeFileSync(join(outsideDir, 'secret.txt'), 'must not publish');
+  symlinkSync(outsideDir, join(projectDir, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  const result = await buildStaticPreview({
+    inspection: { runtime: 'html' },
+    zipBuffer: Buffer.from('html symlink output'),
+    projectDir,
+    cacheDir: join(temporaryDir, 'npm-cache'),
+  });
+
+  assert.notEqual(result.preview.status, 'ready');
+  assert.equal(result.preview.failureCode, 'unsafe-output');
+  assert.equal(result.outputDir, null);
+});
+
 test('timeout forces removal of the named container', async () => {
   const calls = [];
   const result = await buildStaticPreview({

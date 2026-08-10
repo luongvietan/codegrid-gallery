@@ -8,15 +8,31 @@ export interface RuntimeProject {
   workingDirectory: string;
   installCommand: string[];
   devCommand: string[];
+  /** Set when the preview pins Next below the version the template declares. */
+  nextDowngradedTo: string | null;
 }
 
 export const RUNTIME_PROJECT_ERROR = 'Runtime project is invalid or unsupported.';
-export const RUNTIME_UNSUPPORTED_NEXT_ERROR =
-  'Template dùng Next.js 16 trở lên, chưa chạy được trong trình duyệt: Next.js 16 chỉ nạp được '
-  + 'WASM bindings trong WebContainer và vỡ invariant nội bộ khi render. Xem tab Code hoặc chạy local.';
 
-/** A template the browser runtime deliberately declines, as opposed to a malformed one. */
-export class UnsupportedRuntimeError extends Error {}
+/**
+ * Next 16 only loads WASM SWC bindings inside WebContainer and then breaks its own workStore
+ * invariant while rendering — in dev and in a production build alike. Preview those templates on
+ * a Next that does run there; the archive and the Code tab keep the original version.
+ *
+ * The pin is narrow because both edges were measured in WebContainer against real templates:
+ * 15.5 still throws the sibling `workUnitAsyncStorage` invariant, while 14 predates APIs these
+ * templates use (`next/font` has no Geist) and would need React pinned back to 18 as well.
+ * 15.1 renders them unchanged on React 19.
+ */
+export const NEXT_DOWNGRADE_RANGE = '15.1';
+/** Empty while the pin stays on 15.x, which peers React 19 like the templates already do. */
+const DOWNGRADE_PEERS: Record<string, string> = {};
+
+/** Bundler flags that only exist in Next 16 and would abort the downgraded run. */
+const NEXT_16_ONLY_FLAGS = new Set(['--webpack', '--turbopack']);
+/** Tooling pinned to the original major, unused by the preview but able to drag it back in. */
+const NEXT_PINNED_TOOLING = ['eslint-config-next', '@next/eslint-plugin-next'];
+const LOCKFILES = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml']);
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'node_modules']);
 const PROTOTYPE_POLLUTING_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -86,7 +102,7 @@ function packageManifest(contents: ArrayBuffer): {
   scripts: Record<string, string>;
   packageManager: string | null;
   hasNextDependency: boolean;
-  needsUnsupportedNext: boolean;
+  needsNextDowngrade: boolean;
 } {
   let parsed: unknown;
   try {
@@ -116,8 +132,42 @@ function packageManifest(contents: ArrayBuffer): {
     scripts: Object.fromEntries(validScripts),
     packageManager: typeof packageManager === 'string' ? packageManager : null,
     hasNextDependency: nextVersion !== null,
-    needsUnsupportedNext: nextVersion !== null && nextRangeGuaranteesMajor16(nextVersion),
+    needsNextDowngrade: nextVersion !== null && nextRangeGuaranteesMajor16(nextVersion),
   };
+}
+
+/** Rewrite the mounted manifest so the preview installs a Next major that runs on WASM SWC. */
+function downgradedManifest(contents: ArrayBuffer): ArrayBuffer {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(contents)) as Record<string, unknown>;
+  } catch {
+    return invalidProject();
+  }
+
+  for (const group of ['dependencies', 'devDependencies'] as const) {
+    const bucket = parsed[group];
+    if (!bucket || typeof bucket !== 'object' || Array.isArray(bucket)) continue;
+    const entries = bucket as Record<string, unknown>;
+    if (typeof entries.next === 'string') entries.next = NEXT_DOWNGRADE_RANGE;
+    for (const [peer, range] of Object.entries(DOWNGRADE_PEERS)) {
+      if (typeof entries[peer] === 'string') entries[peer] = range;
+    }
+    for (const pinned of NEXT_PINNED_TOOLING) delete entries[pinned];
+  }
+
+  const scripts = parsed.scripts;
+  if (scripts && typeof scripts === 'object' && !Array.isArray(scripts)) {
+    for (const [name, command] of Object.entries(scripts as Record<string, unknown>)) {
+      if (typeof command !== 'string') continue;
+      (scripts as Record<string, string>)[name] = command
+        .split(/\s+/)
+        .filter((token) => !NEXT_16_ONLY_FLAGS.has(token))
+        .join(' ');
+    }
+  }
+
+  return new TextEncoder().encode(JSON.stringify(parsed, null, 2)).buffer as ArrayBuffer;
 }
 
 function isDirectory(entry: FileSystemTree[string]): entry is DirectoryNode {
@@ -186,21 +236,31 @@ export function prepareRuntimeProject(zip: ExtractedZip): RuntimeProject {
     const manifest = manifestEntry(entries);
     if (!manifest) return invalidProject();
     const pkg = packageManifest(manifest.contents);
-    // Next 16 only loads WASM SWC bindings inside WebContainer and then breaks its own
-    // workStore invariant while rendering — in dev and in a production build alike. Decline
-    // before booting instead of spending an install on a runtime that can only serve errors.
-    if (pkg.needsUnsupportedNext) throw new UnsupportedRuntimeError(RUNTIME_UNSUPPORTED_NEXT_ERROR);
     const root = manifest.segments.slice(0, -1).join('/');
     const rootPrefix = root ? `${root}/` : '';
-    const commands = commandsFor(rootPrefix, entries.map((entry) => entry.name), pkg);
+
+    // A downgraded manifest no longer matches the published lockfile, so the lockfile has to go
+    // with it — otherwise `npm ci` would reinstall the very major that cannot run here.
+    const mountedEntries = pkg.needsNextDowngrade
+      ? entries
+        .filter((entry) => !(entry.name.startsWith(rootPrefix) && LOCKFILES.has(entry.segments.at(-1)!)))
+        .map((entry) => (entry === manifest
+          ? { ...entry, contents: downgradedManifest(entry.contents) }
+          : entry))
+      : entries;
+    const commands = commandsFor(
+      rootPrefix,
+      mountedEntries.map((entry) => entry.name),
+      pkg.needsNextDowngrade ? packageManifest(manifestEntry(mountedEntries)!.contents) : pkg,
+    );
 
     return {
-      files: buildFileTree(entries),
+      files: buildFileTree(mountedEntries),
       workingDirectory: root,
+      nextDowngradedTo: pkg.needsNextDowngrade ? NEXT_DOWNGRADE_RANGE : null,
       ...commands,
     };
-  } catch (error) {
-    if (error instanceof UnsupportedRuntimeError) throw error;
+  } catch {
     return invalidProject();
   }
 }

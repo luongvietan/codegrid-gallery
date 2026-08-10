@@ -224,6 +224,7 @@ button, select { touch-action: manipulation; }
 .pane-preview { flex-direction: column; }
 .preview-toolbar, .code-head { display: flex; align-items: center; gap: var(--spacing-8); padding: 10px var(--spacing-16); border-bottom: 1px solid var(--line); background: var(--surface-2); }
 .status { flex: 1; overflow: hidden; color: var(--muted); font: 12px/1.5 ui-monospace, "SF Mono", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.status.notice { flex: 0 1 auto; padding: 3px 8px; border-radius: 6px; background: var(--accent-soft); color: var(--accent); }
 .ghost { border: 1px solid var(--line); padding: 7px 12px; border-radius: 8px; background: var(--surface-1); color: var(--txt-2); cursor: pointer; font-size: 12px; transition: border-color 180ms var(--ease), color 180ms var(--ease); }
 .ghost:hover { border-color: var(--accent); color: var(--accent); }
 .iframe-wrap { position: relative; flex: 1; background: white; }

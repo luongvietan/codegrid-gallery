@@ -280,10 +280,31 @@ switches; the token-field difference between them is handled automatically.
   referenced urls against files on disk — but the last blocker is a trade-off,
   not a bug: `overflow: hidden` stops one section's absolutely-positioned content
   painting across the next, and clips content that meant to overflow.
-- **What stacking cannot fix is identity.** Once the structural faults are gone,
-  the critique's remaining findings are that the page shows three different
-  brands, three type hierarchies and three notions of what a header is — because
-  it is three finished designs stapled together. Scoping CSS makes a page
-  structurally coherent; it does not make it one design. Closing that gap means
-  generating markup from a technique rather than transplanting a component, which
-  is what the technique index exists for and what nothing yet uses it for.
+## Reuse against generation, measured
+
+`generate.mjs` writes a slot instead of transplanting one: the model gets the
+page's tokens, the slot's intent, and the techniques mined from the corpus —
+mechanism, parameter ranges, and a real code excerpt from a component that
+exhibits each, cited for syntax and not for markup.
+
+The same composition, same brief, same critique model, built two ways and judged
+twice each:
+
+| build | run 1 | run 2 |
+|---|---|---|
+| 3 components reused + 3 sections written | revise 2/5, **2 blockers** | revise 3/5, **1 blocker** |
+| all 7 sections written | revise 3/5, **0 blockers** | revise 3/5, **0 blockers** |
+
+The written page reaches zero blockers on both runs; the hybrid does not, and its
+surviving blocker is the same reused component both times. Attribution in the
+hybrid run is the same story: every blocker and major landed on a transplanted
+component, and the three written sections drew one minor between them.
+
+What the written page still gets wrong is polish — a headline that wraps badly, a
+section title clipped at a viewport edge, low-contrast secondary copy. Those are
+notes a designer gives; the reused page's faults were closer to "this control is
+unusable".
+
+Scope this honestly: one composition, one brief, two runs per build, and a judge
+that is not deterministic. It is evidence that generating beats transplanting
+*here*, not a benchmark.

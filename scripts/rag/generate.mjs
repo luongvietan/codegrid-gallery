@@ -17,16 +17,19 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isTextFile } from '../ingest-lib.mjs';
 import { resolveLlm, createChat } from './llm.mjs';
+import { embedBatch, embedConfig } from './provider.mjs';
+import { rankTechniques } from './retrieval.mjs';
 import { generateSection } from './generation.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const EXCERPT_BYTES = 1800;
 
 function parseArgs(argv) {
-  const o = { dir: null, corpus: path.join(ROOT, 'corpus'), only: null, force: false };
+  const o = { dir: null, corpus: path.join(ROOT, 'corpus'), only: null, force: false, all: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--slot') o.only = argv[++i];
+    else if (a === '--all') o.all = true;
     else if (a === '--force') o.force = true;
     else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
     else if (a.startsWith('--')) { console.error(`Unknown argument: ${a}`); process.exit(2); }
@@ -59,21 +62,41 @@ async function main() {
   if (!fs.existsSync(planFile)) { console.error(`No plan.json in ${opts.dir} — run compose.mjs first.`); process.exit(1); }
   const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 
-  let unfilled = plan.unfilled || [];
-  if (opts.only) unfilled = unfilled.filter((u) => u.key === opts.only);
-  if (!unfilled.length) { console.log('No unfilled slots to write.'); return; }
+  // --all writes every slot, including the ones a component was found for. That
+  // is the experiment: a page written entirely to one spec, against the same page
+  // built by transplanting components, judged by the same critique.
+  let targets = opts.all ? (plan.plan?.slots || []) : (plan.unfilled || []);
+  if (opts.only) targets = targets.filter((u) => u.key === opts.only);
+  if (!targets.length) { console.log('Nothing to write.'); return; }
+
+  // Slots that were FILLED have no techniques attached — the composer only
+  // retrieves them for slots it could not fill. Retrieve them here.
+  const techniquesBySlot = { ...(plan.techniques || {}) };
+  const needing = targets.filter((t) => !techniquesBySlot[t.key]);
+  if (needing.length) {
+    const cfg = embedConfig();
+    const regFile = path.join(opts.corpus, 'techniques', 'index.json');
+    const all = fs.existsSync(regFile)
+      ? Object.values(JSON.parse(fs.readFileSync(regFile, 'utf8')).techniques || {})
+        .filter((t) => Array.isArray(t.embedding) && t.embedding.length === cfg.dim)
+      : [];
+    if (all.length) {
+      const vecs = await embedBatch(needing.map((t) => t.intent));
+      needing.forEach((t, i) => { techniquesBySlot[t.key] = rankTechniques(all, vecs[i], {}, 3).map((r) => r.card); });
+    }
+  }
 
   const outDir = path.join(opts.dir, 'generated');
   fs.mkdirSync(outDir, { recursive: true });
   const chat = await createChat(resolveLlm());
   const llm = resolveLlm();
-  console.log(`Writing ${unfilled.length} section(s) with ${llm.provider}:${llm.model}`);
+  console.log(`Writing ${targets.length} section(s) with ${llm.provider}:${llm.model}`);
 
   let done = 0, failed = 0;
-  for (const slot of unfilled) {
+  for (const slot of targets) {
     const out = path.join(outDir, `${slot.key}.json`);
     if (!opts.force && fs.existsSync(out)) { console.log(`  ${slot.key.padEnd(12)} cached`); done++; continue; }
-    const techniques = (plan.techniques || {})[slot.key] || [];
+    const techniques = techniquesBySlot[slot.key] || [];
     const excerpts = {};
     for (const t of techniques) excerpts[t.id] = excerptFor(opts.corpus, t);
     try {

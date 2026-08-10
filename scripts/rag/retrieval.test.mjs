@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectDiverse, cosine, applyFilters, rankLocal, rankTechniques, buildRpcArgs, topKHit } from './retrieval.mjs';
+import { selectDiverse, cosine, applyFilters, rankLocal, rankTechniques, buildRpcArgs, topKHit, topKHitAny } from './retrieval.mjs';
 
 const card = (id, over = {}) => ({
   id, comp_type: 'hero', framework: 'vanilla', animation_libs: ['gsap'],
@@ -79,4 +79,13 @@ test('topKHit checks the expected id is in the top k', () => {
   const ranked = [{ id: 'x' }, { id: 'y' }, { id: 'z' }];
   assert.equal(topKHit(ranked, 'z', 3), true);
   assert.equal(topKHit(ranked, 'z', 2), false);
+});
+
+test('topKHitAny accepts any of several equally correct answers', () => {
+  // At 422 cards a brief like "photo grid animating in on scroll" has a dozen
+  // right answers; scoring against one arbitrary id measures the wrong thing.
+  const ranked = [{ card: { id: 'a' } }, { card: { id: 'b' } }, { card: { id: 'c' } }];
+  assert.equal(topKHitAny(ranked, ['q', 'b'], 3), true);
+  assert.equal(topKHitAny(ranked, ['q', 'c'], 2), false);
+  assert.equal(topKHitAny(ranked, [null, undefined], 3), false);
 });

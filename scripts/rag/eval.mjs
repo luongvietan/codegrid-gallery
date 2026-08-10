@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { embedBatch, embedConfig } from './provider.mjs';
-import { rankLocal, topKHit } from './retrieval.mjs';
+import { rankLocal, topKHitAny } from './retrieval.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -52,13 +52,15 @@ async function main() {
   for (let i = 0; i < briefs.length; i++) {
     const b = briefs[i];
     const ranked = rankLocal(cards, qvecs[i], b.filters || {}, Math.max(opts.k, 5));
-    const hit = b.expect_id ? topKHit(ranked, b.expect_id, opts.k) : null;
+    // A brief may have several equally right answers once the corpus is large.
+    const want = b.expect_ids || (b.expect_id ? [b.expect_id] : null);
+    const hit = want ? topKHitAny(ranked, want, opts.k) : null;
     if (hit) hits++;
     const mark = hit === null ? '—' : hit ? '✓' : '✗';
     const top = ranked.slice(0, opts.k).map((r) => `${r.card.id}(${r.sim.toFixed(2)})`).join(', ');
-    console.log(`${mark} "${b.query}"${b.expect_id ? ` [want ${b.expect_id}]` : ''}\n    top${opts.k}: ${top || '(none passed filters)'}`);
+    console.log(`${mark} "${b.query}"${want ? ` [want ${want.join(' | ')}]` : ''}\n    top${opts.k}: ${top || '(none passed filters)'}`);
   }
-  const scored = briefs.filter((b) => b.expect_id).length;
+  const scored = briefs.filter((b) => b.expect_ids || b.expect_id).length;
   if (scored) console.log(`\nHit@${opts.k}: ${hits}/${scored} (${(100 * hits / scored).toFixed(0)}%)`);
   console.log('If two cards come back near-identical -> schema lacks discriminating power (tighten description part (a)).');
   console.log('If the right card misses -> probes use code vocabulary, not brief vocabulary (fix annotator rule 3).');

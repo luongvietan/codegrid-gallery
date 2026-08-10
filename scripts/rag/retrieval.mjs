@@ -89,5 +89,18 @@ export function buildRpcArgs(f = {}, limit = 5) {
 
 /** Did the expected id land in the top-k? Used by the eval harness. */
 export function topKHit(ranked, expectId, k = 3) {
-  return ranked.slice(0, k).some((r) => (r.card ? r.card.id : r.id) === expectId);
+  return topKHitAny(ranked, [expectId], k);
+}
+
+/**
+ * Did ANY acceptable id land in the top-k?
+ * At 20 cards a brief has one right answer; at 422 it has several — "a photo grid
+ * that animates in on scroll" matches a dozen of the 120 galleries equally well.
+ * Scoring against a single id then measures agreement with an arbitrary pick, not
+ * retrieval quality, and the score collapses as the corpus grows even though the
+ * results get better. Briefs carry `expect_ids` for that reason.
+ */
+export function topKHitAny(ranked, expectIds, k = 3) {
+  const want = new Set(expectIds.filter(Boolean));
+  return ranked.slice(0, k).some((r) => want.has(r.card ? r.card.id : r.id));
 }

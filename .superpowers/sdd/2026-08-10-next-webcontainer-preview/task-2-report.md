@@ -230,6 +230,66 @@ npm run build
 The build emitted only the previously documented multiple-lockfile/Turbopack
 root warning.
 
+## Final reviewer correction — non-concurrent boot recovery
+
+### RED
+
+The real `@webcontainer/api` permits only one concurrent `boot()` call, so the
+previous scheduling-slot release was invalid even though its fake lifecycle test
+allowed it. Reversed the regression contract and added explicit recovery-policy
+coverage:
+
+- a boot timeout must be marked `reload`, not normal retry;
+- a second lifecycle attempt while the first boot is unresolved must not call
+  `boot()`;
+- reload maps to `Tải lại trang`, while ordinary failure maps to `Thử lại`.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 1 — 8 passed, 3 failed
+# second boot was called; recovery state and policy helper were absent
+```
+
+### GREEN
+
+Boot acquisition again retains its global scheduling slot until the real boot
+promise settles. A timed-out boot publishes a `reload` recovery state; the
+Preview action is labeled `Tải lại trang` and calls `window.location.reload()`.
+No second boot can be scheduled behind an unresolved first boot. When the stale
+promise eventually settles, its aborted run tears down that container before
+the queue advances. Install, dev-start, server-ready, preparation, and other
+runtime failures remain `retry` and retain the existing `Thử lại` behavior.
+
+The Strict Mode test again requires first teardown before replacement boot and
+continues to assert no post-cancel state updates.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 0 — 11 passed, 0 failed
+```
+
+## Browser QA regression — Service Worker preview isolation headers
+
+Global credentialless COEP also applies to the modal page. Legacy HTML preview
+documents served from Cache Storage lacked their own compatible COEP header, so
+Chromium blocked the iframe with a refused-to-connect result.
+
+Added a VM-backed test that executes the real `public/sw.js`, loads HTML and
+JavaScript through its message handler, and requests cached, missing, and asset
+paths through its fetch handler.
+
+```text
+node --test public/sw.test.mjs
+# RED: exit 1 — cached HTML COEP was null
+# GREEN: exit 0 — 1 passed, 0 failed
+```
+
+Every preview response stored in Cache Storage now carries
+`Cross-Origin-Embedder-Policy: credentialless` and
+`Cross-Origin-Resource-Policy: same-origin`; synthetic preview 404 responses use
+the same policy. Existing content types, response bodies, cache controls, root
+aliases, scripts, and other assets are preserved.
+
 The deadline tests assert normalized retryable failures for every phase, install
 retry to ready, tracked process/listener/container cleanup, late boot teardown,
 and late dev-process kill without weakening the existing Strict Mode/singleton
@@ -293,3 +353,29 @@ container has no active lifecycle effects.
 node --test lib/webcontainer-preview.test.mjs
 # exit 0 — 10 passed, 0 failed
 ```
+
+### Final correction verification
+
+The later non-concurrent correction supersedes the scheduling decision in this
+residual section. Final verification for the reload-required boot policy and
+Service Worker isolation fix passed:
+
+```text
+npm run test:pipeline
+# exit 0 — 110 passed, 0 failed
+
+node --check public/sw.js
+# exit 0
+
+npx eslint lib/webcontainer-preview.ts lib/webcontainer-preview.test.mjs components/ProjectModal.tsx components/tabs/RuntimePreviewTab.tsx lib/webcontainer-runtime.ts public/sw.test.mjs
+# exit 0
+
+npx tsc --noEmit
+# exit 0
+
+npm run build
+# exit 0
+```
+
+The production build retains only the previously documented multiple-lockfile
+Turbopack-root warning.

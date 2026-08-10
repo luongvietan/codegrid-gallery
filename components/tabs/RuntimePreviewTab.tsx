@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import {
+  runtimeRecoveryPolicy,
   runRuntimePreview,
   type RuntimePreviewSnapshot,
 } from '@/lib/webcontainer-preview';
@@ -15,6 +16,7 @@ const INITIAL_SNAPSHOT: RuntimePreviewSnapshot = {
   logs: [],
   url: null,
   error: null,
+  recovery: null,
 };
 
 export default function RuntimePreviewTab({
@@ -52,6 +54,7 @@ export default function RuntimePreviewTab({
   }, [attempt, zip]);
 
   const readyUrl = snapshot.phase === 'ready' ? snapshot.url : null;
+  const recovery = runtimeRecoveryPolicy(snapshot.recovery);
 
   return (
     <section className="pane pane-preview active">
@@ -93,15 +96,19 @@ export default function RuntimePreviewTab({
           {snapshot.logs.length > 0 && (
             <pre className="runtime-output">{snapshot.logs.join('\n')}</pre>
           )}
-          {snapshot.phase === 'failure' && (
+          {snapshot.phase === 'failure' && recovery && (
             <button
               className="ghost"
               onClick={() => {
+                if (recovery.action === 'reload') {
+                  window.location.reload();
+                  return;
+                }
                 setSnapshot(INITIAL_SNAPSHOT);
                 setAttempt((value) => value + 1);
               }}
             >
-              Thử lại
+              {recovery.label}
             </button>
           )}
         </div>

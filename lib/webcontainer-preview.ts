@@ -13,6 +13,7 @@ export type RuntimePreviewPhase =
   | 'starting'
   | 'ready'
   | 'failure';
+export type RuntimePreviewRecovery = 'retry' | 'reload';
 
 export interface RuntimePreviewSnapshot {
   phase: RuntimePreviewPhase;
@@ -20,6 +21,7 @@ export interface RuntimePreviewSnapshot {
   logs: string[];
   url: string | null;
   error: string | null;
+  recovery: RuntimePreviewRecovery | null;
 }
 
 export interface RuntimePreviewTimeouts {
@@ -73,6 +75,17 @@ const DEFAULT_TIMEOUTS: RuntimePreviewTimeouts = {
   serverReadyMs: 60_000,
 };
 let bootQueue: Promise<void> = Promise.resolve();
+
+class BootTimeoutError extends Error {}
+
+export function runtimeRecoveryPolicy(recovery: RuntimePreviewRecovery | null): {
+  action: RuntimePreviewRecovery;
+  label: string;
+} | null {
+  if (recovery === 'reload') return { action: 'reload', label: 'Tải lại trang' };
+  if (recovery === 'retry') return { action: 'retry', label: 'Thử lại' };
+  return null;
+}
 
 export function createRuntimeLogBuffer({
   maxLines = 80,
@@ -133,17 +146,8 @@ async function acquireRuntime(
     return null;
   }
 
-  const releaseAbortedBoot = () => releaseSchedulingSlot();
-  signal.addEventListener('abort', releaseAbortedBoot, { once: true });
-  if (signal.aborted) {
-    signal.removeEventListener('abort', releaseAbortedBoot);
-    releaseSchedulingSlot();
-    return null;
-  }
-
   try {
     const container = await boot({ coep: 'credentialless' });
-    signal.removeEventListener('abort', releaseAbortedBoot);
     if (signal.aborted) {
       try { container.teardown(); } finally { releaseSchedulingSlot(); }
       return null;
@@ -159,7 +163,6 @@ async function acquireRuntime(
       },
     };
   } catch (error) {
-    signal.removeEventListener('abort', releaseAbortedBoot);
     releaseSchedulingSlot();
     throw error;
   }
@@ -173,13 +176,13 @@ function commandName(command: string, args: string[]): string {
 async function withDeadline<T>(
   operation: Promise<T>,
   timeoutMs: number,
-  timeoutMessage: string,
+  timeoutFailure: Error,
   onTimeout: () => void,
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(timeoutMessage));
+      reject(timeoutFailure);
       onTimeout();
     }, timeoutMs);
   });
@@ -208,6 +211,7 @@ export async function runRuntimePreview({
   let phase: RuntimePreviewPhase = 'preparing';
   let url: string | null = null;
   let error: string | null = null;
+  let recovery: RuntimePreviewRecovery | null = null;
   let cancelRun = () => {};
   const cancelled = new Promise<never>((_resolve, reject) => {
     cancelRun = () => {
@@ -231,6 +235,7 @@ export async function runRuntimePreview({
       logs: logs.snapshot(),
       url,
       error,
+      recovery,
     });
   };
   const setPhase = (nextPhase: RuntimePreviewPhase) => {
@@ -293,7 +298,7 @@ export async function runRuntimePreview({
         cancelled,
         stopped,
       ]);
-    })(), timeouts.bootMs, 'Runtime boot timed out.', () => lifecycle.abort());
+    })(), timeouts.bootMs, new BootTimeoutError('Runtime boot timed out.'), () => lifecycle.abort());
     const activeLease = leaseState.current;
     if (!activeLease) throw CANCELLED;
 
@@ -319,7 +324,7 @@ export async function runRuntimePreview({
       if (installExit !== 0) {
         throw new Error(`${commandName(installCommand, installArgs)} exited with code ${installExit}.`);
       }
-    })(), timeouts.installMs, 'Dependency install timed out.', () => lifecycle.abort());
+    })(), timeouts.installMs, new Error('Dependency install timed out.'), () => lifecycle.abort());
 
     setPhase('starting');
     let serverReady: (readyUrl: string) => void = () => {};
@@ -332,7 +337,7 @@ export async function runRuntimePreview({
       runtimeError,
       cancelled,
       stopped,
-    ]), timeouts.startMs, 'Dev server start timed out.', () => lifecycle.abort());
+    ]), timeouts.startMs, new Error('Dev server start timed out.'), () => lifecycle.abort());
     void streamOutput(dev).catch((streamError) => rejectRuntimeError(streamError));
     const devExit = dev.exit.then((exitCode) => {
       throw new Error(`${commandName(devCommand, devArgs)} exited with code ${exitCode}.`);
@@ -344,13 +349,14 @@ export async function runRuntimePreview({
       runtimeError,
       cancelled,
       stopped,
-    ]), timeouts.serverReadyMs, 'Server readiness timed out.', () => lifecycle.abort());
+    ]), timeouts.serverReadyMs, new Error('Server readiness timed out.'), () => lifecycle.abort());
     setPhase('ready');
     await Promise.race([devExit, runtimeError, cancelled, stopped]);
   } catch (runtimeFailure) {
     if (runtimeFailure !== CANCELLED && !signal.aborted) {
       phase = 'failure';
       error = normalizeRuntimeError(runtimeFailure);
+      recovery = runtimeFailure instanceof BootTimeoutError ? 'reload' : 'retry';
       emit();
     }
   } finally {

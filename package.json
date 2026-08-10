@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:pipeline": "tsx --test scripts/preview-classifier.test.mjs scripts/preview-builder.test.mjs scripts/preview-artifacts.test.mjs scripts/sync-lib.test.mjs scripts/backfill-previews.test.mjs lib/preview.test.mjs"
   },
   "dependencies": {
     "next": "16.2.9",
@@ -19,6 +20,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "tsx": "^4.23.11",
     "typescript": "^5"
   }
 }

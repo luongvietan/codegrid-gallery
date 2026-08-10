@@ -1,6 +1,44 @@
 // scripts/sync-lib.mjs
 // Pure helpers for the daily CI sync. No I/O — unit-tested in sync-lib.test.mjs.
 
+import { projectTypeForRuntime } from './preview-classifier.mjs';
+
+const IMMUTABLE_CACHE_CONTROL = 'public,max-age=31536000,immutable';
+const AWS_ENV_ALLOWLIST = ['PATH', 'SystemRoot', 'HOME', 'USERPROFILE', 'TEMP', 'TMP', 'LANG', 'LC_ALL'];
+
+/** Build the AWS CLI arguments for a content-addressed preview artifact upload. */
+export function artifactUploadArgs(localDir, sourceHash, bucket, endpoint) {
+  return [
+    's3', 'cp', localDir, `s3://${bucket}/previews/${sourceHash}`,
+    '--recursive', '--cache-control', IMMUTABLE_CACHE_CONTROL,
+    '--endpoint-url', endpoint,
+  ];
+}
+
+/** Delay for retry attempt 0..n, preferring an upstream Retry-After value when present. */
+export function retryDelayMs(attempt, retryAfterMs, random = Math.random) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs >= 0) return retryAfterMs;
+  const exponential = Math.min(30_000, 1_000 * (2 ** Math.max(0, attempt)));
+  const jitter = Math.round(Math.min(1, Math.max(0, random())) * 1_000);
+  return exponential + jitter;
+}
+
+/** Minimal AWS CLI environment with retries owned by the outer orchestration loop. */
+export function awsInvocationEnv(baseEnv) {
+  return {
+    ...Object.fromEntries(
+      AWS_ENV_ALLOWLIST
+        .filter((name) => typeof baseEnv[name] === 'string')
+        .map((name) => [name, baseEnv[name]]),
+    ),
+    AWS_ACCESS_KEY_ID: baseEnv.R2_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY: baseEnv.R2_SECRET_ACCESS_KEY,
+    AWS_DEFAULT_REGION: 'auto',
+    AWS_MAX_ATTEMPTS: '1',
+    AWS_RETRY_MODE: 'standard',
+  };
+}
+
 /** Replace filesystem-invalid characters with '_', then trim. Mirrors download_codegrid.py. */
 export function sanitizeFilename(name) {
   return name.replace(/[<>:"\/\\|?*]/g, '_').trim();
@@ -53,7 +91,7 @@ export function listZipEntries(buf) {
   return names;
 }
 
-/** Classify a zip's file list into 'nextjs' | 'react' | 'html'. Mirrors build-index.mjs. */
+/** Legacy filename-only classifier retained until ci-sync migrates to inspectTemplateArchive. */
 export function classify(names) {
   const real = names.map((n) => n.toLowerCase()).filter((n) => !n.startsWith('__macosx/'));
   if (real.some((n) => /(^|\/)next\.config\.(js|mjs|ts|cjs)$/.test(n))) return 'nextjs';
@@ -88,12 +126,14 @@ export function pickThumbnail(images) {
 }
 
 /** Build one index project entry (same shape build-index.mjs produces). */
-export function buildProjectEntry({ msg, folder, type, entryHtml, attachments }) {
+export function buildProjectEntry({ msg, folder, runtime, preview, type, entryHtml, attachments }) {
   return {
     id: slug(folder),
     folder,
     title: prettyTitle(folder),
-    type,
+    type: runtime ? projectTypeForRuntime(runtime) : type,
+    runtime,
+    preview,
     date: (msg.timestamp || '').slice(0, 10) || null,
     author: msg.author?.username ?? null,
     msgId: msg.id,

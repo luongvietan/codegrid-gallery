@@ -255,6 +255,7 @@ button, select { touch-action: manipulation; }
 .spinner { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--spacing-12); padding: var(--spacing-64) var(--spacing-24); color: var(--muted); overflow-wrap: anywhere; text-align: center; }
 .spinner::before { content: ""; width: 26px; height: 26px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 .spinner.no-spin::before { display: none; }
+.runtime-output { width: min(760px, 100%); max-height: min(40vh, 320px); overflow: auto; margin: 0; padding: var(--spacing-12); border-radius: var(--radius-xl); background: var(--color-ink-black); color: #eef0f2; font: 12px/1.5 ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace; text-align: left; white-space: pre-wrap; }
 .grid > .spinner { grid-column: 1 / -1; }
 @keyframes spin { to { transform: rotate(360deg); } }
 body.modal-open { overflow: hidden; }

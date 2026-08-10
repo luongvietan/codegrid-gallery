@@ -3,7 +3,11 @@ import type {
   FileSystemTree,
   WebContainerProcess,
 } from '@webcontainer/api';
-import { prepareRuntimeProject, type RuntimeProject } from './webcontainer-runtime.ts';
+import {
+  prepareRuntimeProject,
+  UnsupportedRuntimeError,
+  type RuntimeProject,
+} from './webcontainer-runtime.ts';
 import type { ExtractedZip } from './zip.ts';
 
 export type RuntimePreviewPhase =
@@ -211,6 +215,7 @@ export async function runRuntimePreview({
   let phase: RuntimePreviewPhase = 'preparing';
   let url: string | null = null;
   let error: string | null = null;
+  let unsupported = false;
   let recovery: RuntimePreviewRecovery | null = null;
   let cancelRun = () => {};
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -226,12 +231,18 @@ export async function runRuntimePreview({
     if (lifecycle.signal.aborted) stop();
     else lifecycle.signal.addEventListener('abort', stop, { once: true });
   });
+  // These reject on teardown even when no race is waiting on them — for instance when the
+  // project is rejected before the first spawn. Keep their rejections handled.
+  void cancelled.catch(() => {});
+  void stopped.catch(() => {});
 
   const emit = () => {
     if (signal.aborted) return;
     onUpdate({
       phase,
-      message: phase === 'failure' ? `Lỗi runtime: ${error}` : PHASE_MESSAGE[phase],
+      message: phase === 'failure'
+        ? (unsupported ? String(error) : `Lỗi runtime: ${error}`)
+        : PHASE_MESSAGE[phase],
       logs: logs.snapshot(),
       url,
       error,
@@ -356,7 +367,12 @@ export async function runRuntimePreview({
     if (runtimeFailure !== CANCELLED && !signal.aborted) {
       phase = 'failure';
       error = normalizeRuntimeError(runtimeFailure);
-      recovery = runtimeFailure instanceof BootTimeoutError ? 'reload' : 'retry';
+      unsupported = runtimeFailure instanceof UnsupportedRuntimeError;
+      recovery = runtimeFailure instanceof BootTimeoutError
+        ? 'reload'
+        : runtimeFailure instanceof UnsupportedRuntimeError
+          ? null
+          : 'retry';
       emit();
     }
   } finally {

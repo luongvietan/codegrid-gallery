@@ -11,11 +11,17 @@ export interface RuntimeProject {
 }
 
 export const RUNTIME_PROJECT_ERROR = 'Runtime project is invalid or unsupported.';
+export const RUNTIME_UNSUPPORTED_NEXT_ERROR =
+  'Template dùng Next.js 16 trở lên, chưa chạy được trong trình duyệt: Next.js 16 chỉ nạp được '
+  + 'WASM bindings trong WebContainer và vỡ invariant nội bộ khi render. Xem tab Code hoặc chạy local.';
+
+/** A template the browser runtime deliberately declines, as opposed to a malformed one. */
+export class UnsupportedRuntimeError extends Error {}
 
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'node_modules']);
 const PROTOTYPE_POLLUTING_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
 
-function nextRangeGuaranteesWebpack(range: string): boolean {
+function nextRangeGuaranteesMajor16(range: string): boolean {
   const match = range.trim().match(
     /^(?:\^|~|>=)?\s*v?(\d+)(?:\.\d+)?(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
   );
@@ -80,7 +86,7 @@ function packageManifest(contents: ArrayBuffer): {
   scripts: Record<string, string>;
   packageManager: string | null;
   hasNextDependency: boolean;
-  nextRangeGuaranteesWebpack: boolean;
+  needsUnsupportedNext: boolean;
 } {
   let parsed: unknown;
   try {
@@ -110,7 +116,7 @@ function packageManifest(contents: ArrayBuffer): {
     scripts: Object.fromEntries(validScripts),
     packageManager: typeof packageManager === 'string' ? packageManager : null,
     hasNextDependency: nextVersion !== null,
-    nextRangeGuaranteesWebpack: nextVersion !== null && nextRangeGuaranteesWebpack(nextVersion),
+    needsUnsupportedNext: nextVersion !== null && nextRangeGuaranteesMajor16(nextVersion),
   };
 }
 
@@ -157,7 +163,6 @@ function commandsFor(
   const serverArgs = isNextDev || /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
     ? ['--hostname', '0.0.0.0']
     : [];
-  if (isNextDev && pkg.nextRangeGuaranteesWebpack) serverArgs.push('--webpack');
   if (usesPnpm) {
     return {
       installCommand: hasPnpmLock
@@ -181,6 +186,10 @@ export function prepareRuntimeProject(zip: ExtractedZip): RuntimeProject {
     const manifest = manifestEntry(entries);
     if (!manifest) return invalidProject();
     const pkg = packageManifest(manifest.contents);
+    // Next 16 only loads WASM SWC bindings inside WebContainer and then breaks its own
+    // workStore invariant while rendering — in dev and in a production build alike. Decline
+    // before booting instead of spending an install on a runtime that can only serve errors.
+    if (pkg.needsUnsupportedNext) throw new UnsupportedRuntimeError(RUNTIME_UNSUPPORTED_NEXT_ERROR);
     const root = manifest.segments.slice(0, -1).join('/');
     const rootPrefix = root ? `${root}/` : '';
     const commands = commandsFor(rootPrefix, entries.map((entry) => entry.name), pkg);
@@ -190,7 +199,8 @@ export function prepareRuntimeProject(zip: ExtractedZip): RuntimeProject {
       workingDirectory: root,
       ...commands,
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsupportedRuntimeError) throw error;
     return invalidProject();
   }
 }

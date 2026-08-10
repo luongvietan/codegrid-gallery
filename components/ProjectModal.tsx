@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { needsSourceZip, previewKind, type PreviewTab as Tab } from '@/lib/preview';
+import { hasPreviewTab, needsSourceZip, previewKind, type PreviewTab as Tab } from '@/lib/preview';
 import type { Project } from '@/lib/types';
 import { fetchAndExtractZip, type ExtractedZip } from '@/lib/zip';
 import CodeTab from './tabs/CodeTab';
 import MediaTab from './tabs/MediaTab';
 import PreviewTab from './tabs/PreviewTab';
+import RuntimePreviewTab from './tabs/RuntimePreviewTab';
 import StaticPreviewTab from './tabs/StaticPreviewTab';
 
 const TYPE_LABEL: Record<string, string> = { html: 'HTML', nextjs: 'Next.js', react: 'React' };
@@ -15,7 +16,7 @@ export default function ProjectModal({ p, onClose, onToast }: {
   p: Project; onClose: () => void; onToast: (m: string) => void;
 }) {
   const kind = previewKind(p);
-  const hasPreview = kind !== 'none';
+  const hasPreview = hasPreviewTab(p);
   const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : (p.type === 'html' ? 'media' : 'code'));
   const [zip, setZip] = useState<ExtractedZip | null>(null);
   const [loading, setLoading] = useState(false);
@@ -80,6 +81,7 @@ export default function ProjectModal({ p, onClose, onToast }: {
         </div>
         <div className="modal-body">
           {tab === 'preview' && kind === 'static' && p.preview && <StaticPreviewTab preview={p.preview} />}
+          {tab === 'preview' && kind === 'runtime-required' && p.type !== 'html' && <RuntimePreviewTab type={p.type} />}
           {tab === 'preview' && kind === 'legacy-html' && err && <div className="spinner no-spin">Lỗi: {err}</div>}
           {tab === 'preview' && kind === 'legacy-html' && !err && !zip && <div className="spinner">Đang tải &amp; giải nén zip…</div>}
           {tab === 'preview' && kind === 'legacy-html' && !err && zip && <PreviewTab p={p} zip={zip} onToast={onToast} />}

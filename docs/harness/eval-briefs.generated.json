@@ -1,0 +1,212 @@
+[
+  {
+    "query": "Centered oversized logo that scales down and glides up to a fixed header as the page scrolls.",
+    "expect_id": "2023_03_19_LOGO_SHRINK_ON_SCROLL_HEADER_ANIMATION_ON_SCROLL_HTML_C",
+    "filters": {
+      "compType": "nav"
+    }
+  },
+  {
+    "query": "Minimal dark landing page with large auto-scrolling marquee text and mouse-move parallax floating shapes",
+    "expect_id": "2023_03_19_PARALLAX_LANDING_PAGE_MARQUEE_ANIMATION_MOUSEMOVE_PARALL",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen horizontal image carousel with vertical side labels and overlay text, navigated by arrows",
+    "expect_id": "2023_03_19_RESPONSIVE_CONTENT_SLIDER_HTML_CSS_SWIPER_JS",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen panel revealed by a flattening SVG curve, product images wiping in and scaling down, row drifts horizontally following mouse.",
+    "expect_id": "2023_05_01_PRODUCT_SLIDER_HTML_CSS_SVG_MORPHING_ANIMATION_PRODUCT_P",
+    "filters": {
+      "compType": "modal"
+    }
+  },
+  {
+    "query": "Split-screen signup layout where a portrait zooms out and wipes from the right while oversized headings slide up.",
+    "expect_id": "2023_05_07_SUBSCRIPTION_PAGE_HTML_CSS_CLIP_PATH_ANIMATION_GSAP_LAND",
+    "filters": {
+      "compType": "cta"
+    }
+  },
+  {
+    "query": "Full-screen route transitions sliding horizontally with fade-in content on navigation.",
+    "expect_id": "2023_06_19_REACT_PAGE_TRANSITIONS_WITH_FRAMER_MOTION_REACT_ROUTER_V6",
+    "filters": {
+      "compType": "page_transition"
+    }
+  },
+  {
+    "query": "Brutalist corner menu expands on hover, links stagger in from right, marquee trails cursor",
+    "expect_id": "2023_07_09_BRUTALIST_ANIMATED_WEBSITE_NAVIGATION_MENU_HTML_CSS_JAV",
+    "filters": {
+      "compType": "menu"
+    }
+  },
+  {
+    "query": "Multi-page site with fixed header and full-screen blue curtain vertical wipe on navigation.",
+    "expect_id": "2023_08_06_NEXT_JS_PAGE_TRANSITIONS_USING_FRAMER_MOTION_NEXTJS_13_2",
+    "filters": {
+      "compType": "page_transition"
+    }
+  },
+  {
+    "query": "Horizontal dock of circular icons that scale up on hover, neighbors enlarging too, with springy bounce.",
+    "expect_id": "2023_08_13_MAC_OS_DOCK_USING_JAVASCRIPT",
+    "filters": {
+      "compType": "nav"
+    }
+  },
+  {
+    "query": "Orbital circular gallery of image cards around a central title, with each card scaling up, drifting outward, and dissolving sequentially.",
+    "expect_id": "2023_08_20_ANIMATED_CIRCULAR_IMAGE_SLIDER_LAYOUT_HTML_CSS_JAVASCRI",
+    "filters": {
+      "compType": "gallery"
+    }
+  },
+  {
+    "query": "In a two-column layout, hover zooms images into sepia and reveals frosted geometric plates whose letters stagger in randomly.",
+    "expect_id": "2023_09_17_IMAGE_HOVER_EFFECT_SHOW_TEXT_ON_IMAGE_HOVER_HTML_CSS",
+    "filters": {
+      "compType": "work_grid"
+    }
+  },
+  {
+    "query": "Vertical rows with centered titles, images scale larger as they scroll toward viewport center.",
+    "expect_id": "2023_09_30_GSAP_IMAGE_SCROLL_ANIMATION_HTML_CSS_JAVASCRIPT_ANIMAT",
+    "filters": {
+      "compType": "gallery"
+    }
+  },
+  {
+    "query": "Preloader with digit counter and bars expanding to full screen, rotating away to reveal centered headline sliding up.",
+    "expect_id": "2023_10_08_WEBSITE_PRELOADER_ANIMATION_AWWWARDS_REBUILD_LANDING_PAG",
+    "filters": {
+      "compType": "preloader"
+    }
+  },
+  {
+    "query": "White curtain wipes vertically across viewport, large headline glides upward on dark page.",
+    "expect_id": "2023_11_05_HTML_PAGE_TRANSITION_BARBA_JS_PAGE_TRANSITIONS_HTML_CSS",
+    "filters": {
+      "compType": "page_transition"
+    }
+  },
+  {
+    "query": "Grid of images that explode radially outward on scroll",
+    "expect_id": "2025_03_17_NEXT_JS_FOOTER_GONE_WILD_WATCH_IT_EXPLODE_ON_SCROLL",
+    "filters": {
+      "compType": "footer"
+    }
+  },
+  {
+    "query": "Full-screen hero with cursor-following image trail, each image reveals via horizontal slices expanding from the center before fading.",
+    "expect_id": "2025_05_27_NEXT_JS_ANIMATED_CURSOR_TRAIL_WHERE_EVERY_IMAGE_UNFOLDS_AND",
+    "filters": {
+      "compType": "cursor"
+    }
+  },
+  {
+    "query": "Draggable infinite grid of image tiles with captions, subtle edge distortion, smooth easing after release.",
+    "expect_id": "2025_06_08_THIS_ISN_T_A_PROJECT_PAGE_IT_S_A_DRAGGABLE_INTERFACE_FROM_T",
+    "filters": {
+      "compType": "gallery"
+    }
+  },
+  {
+    "query": "Full-bleed image slider, click triggers expanding circular distortion from center to crossfade slides, text reveals with staggered rise.",
+    "expect_id": "2025_06_22_THE_MOST_AESTHETIC_CONTENT_SLIDER_THAT_WARPS_FRAMES_LIKE_LIQ",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Particle system assembling into a logo that scatters when mouse moves across screen.",
+    "expect_id": "2025_06_29_NEXT_JS_VERSION_THIS_LOGO_MELTS_INTO_FLUID_PARTICLES_WH",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen interactive particle background that swirls and ripples with cursor movement.",
+    "expect_id": "2025_07_07_NEXT_JS_VERSION_THE_INTERACTIVE_FLUID_GRADIENT_YOU_LL_K",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen hero with interactive gradient that flows with cursor, centered logo and minimal top navigation.",
+    "expect_id": "2025_07_07_THE_INTERACTIVE_FLUID_GRADIENT_YOU_LL_KEEP_REUSING_ON_EVERY",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Vertical scroll animation of images that zoom in like a telescope with parallax depth.",
+    "expect_id": "2025_08_03_NEXT_JS_VERSION_SCROLLTRIGGER_TOOK_MY_IMAGE_AND_PEELED",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Scroll-triggered full-screen image zoom with layered masked duplicates scaling at staggered rates and heading text sliding apart.",
+    "expect_id": "2025_08_03_SCROLLTRIGGER_TOOK_MY_IMAGE_AND_PEELED_IT_INTO_LAYERS_ON_SCR",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen hero with product mockup that scales down and fades on scroll, over an animated particle canvas.",
+    "expect_id": "2025_08_04_SCROLLTRIGGER_HIJACKED_MY_VIDEO_PLAYBACK_NOW_IT_PLAYS_ON_SC",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Full-screen pinned headings that reveal background image on scroll through alternating sections.",
+    "expect_id": "2025_08_17_SCROLLTRIGGER_TOOK_MY_TEXT_AND_STRETCHED_IT_INTO_THE_VOID_S",
+    "filters": {
+      "compType": "text_block"
+    }
+  },
+  {
+    "query": "3D gallery grid where cards rotate and tilt with parallax depth on scroll, creating an immersive showcase.",
+    "expect_id": "2025_08_24_NEXT_JS_VERSION_THIS_SCROLL_ANIMATION_FEELS_LIKE_A_3D_E",
+    "filters": {
+      "compType": "gallery"
+    }
+  },
+  {
+    "query": "Progress bar fills, curtain lifts upward to reveal full-screen hero with overlaid title and buttons.",
+    "expect_id": "2025_09_02_GSAP_KEEPS_OUTDOING_ITSELF_WITH_THESE_LANDING_PAGE_ANIMATION",
+    "filters": {
+      "compType": "preloader"
+    }
+  },
+  {
+    "query": "Circular cards scale in, spread into a row with 3D flip, and a logo rises from bottom.",
+    "expect_id": "2025_09_14_ANIMATED_LANDING_PAGE_GSAP_SAID_SHUFFLE_THE_DECK",
+    "filters": {
+      "compType": "hero"
+    }
+  },
+  {
+    "query": "Two-column project card grid where tilted cards rotate upright as each row enters the viewport.",
+    "expect_id": "2025_09_15_NEXT_JS_VERSION_THIS_PROJECTS_PAGE_USED_TO_BE_MID_THEN",
+    "filters": {
+      "compType": "work_grid"
+    }
+  },
+  {
+    "query": "Pinned three-card stack; scrolling flips each card open from the center to show text.",
+    "expect_id": "2025_10_26_THIS_SCROLL_ANIMATION_TURNS_ONE_IMAGE_INTO_THREE_PERFECTLY_F",
+    "filters": {
+      "compType": "work_grid"
+    }
+  }
+]

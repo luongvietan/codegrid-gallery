@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VIEWPORTS, validateCritique, visionPayload, buildCritiquePrompt,
-  mergeFindings, sortFindings, buildFixPlan,
+  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure,
 } from './vision.mjs';
 
 const finding = (over = {}) => ({
@@ -87,6 +87,19 @@ test('buildCritiquePrompt states the brief, the slots and the refusal to be poli
   assert.ok(p.includes('dark editorial studio site'));
   assert.ok(p.includes('hero, work, contact'));
   assert.match(p, /blocker|major|minor/);
+});
+
+test('explainVisionFailure turns a text-only refusal into what to do about it', () => {
+  // Verbatim from DeepSeek v4, which every other step in this pipeline runs on.
+  const raw = 'LLM HTTP 400: {"error":{"message":"Failed to deserialize the JSON body into the target type: messages[0]: unknown variant `image_url`, expected `text`"}}';
+  const out = explainVisionFailure(raw, 'deepseek-v4-flash');
+  assert.match(out, /text-only/);
+  assert.match(out, /deepseek-v4-flash/);
+  assert.match(out, /qwen2\.5vl/);          // the free way out is named
+  assert.ok(out.includes(raw));             // never hide the original
+
+  // Anything else passes through untouched — no guessing at unrelated errors.
+  assert.equal(explainVisionFailure('HTTP 500: upstream exploded', 'm'), 'HTTP 500: upstream exploded');
 });
 
 // ---------- findings ----------

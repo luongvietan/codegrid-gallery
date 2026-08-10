@@ -25,7 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
 import {
   VIEWPORTS, validateCritique, visionPayload, buildCritiquePrompt,
-  mergeFindings, sortFindings, buildFixPlan,
+  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure,
 } from './vision.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -144,7 +144,12 @@ async function main() {
   try { chat = await createChat({ ...llm, model: visionModel }); } catch (e) { console.error(e.message); process.exit(1); }
   console.log(`Reviewing ${images.length} screenshot(s) with ${llm.provider}:${visionModel}...`);
 
-  const raw = await askForCritique(chat, buildCritiquePrompt(brief, slotKeys), images, slotKeys);
+  let raw;
+  try {
+    raw = await askForCritique(chat, buildCritiquePrompt(brief, slotKeys), images, slotKeys);
+  } catch (e) {
+    throw new Error(explainVisionFailure(e.message, visionModel));
+  }
   const critique = { ...raw, findings: sortFindings(mergeFindings(raw.findings)) };
 
   fs.writeFileSync(path.join(outDir, 'CRITIQUE.md'), buildFixPlan(critique, composition, brief));
@@ -157,4 +162,7 @@ async function main() {
   if (blockers) process.exit(1); // so a build loop can gate on "no blockers"
 }
 
-main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });
+// exitCode, not exit(): this script can fail with an HTTP request still in
+// flight, and process.exit() while a socket is open makes libuv abort on Windows
+// — printing a crash assertion right under the message explaining the problem.
+main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exitCode = 1; });

@@ -88,6 +88,25 @@ export function visionPayload(provider, prompt, images) {
   return [{ role: 'user', content }];
 }
 
+/**
+ * Turn a text-only provider's rejection into an instruction.
+ *
+ * DeepSeek v4 — the model this pipeline otherwise runs on — answers an image with
+ * `unknown variant \`image_url\`, expected \`text\``, which reads like a bug in the
+ * caller. It is not: the endpoint simply cannot see. Every other step here works
+ * on that provider, so the failure arrives late and confusingly.
+ */
+export function explainVisionFailure(message, model) {
+  const textOnly = /unknown variant .?image_url|image_url.*not supported|does not support image|invalid.*content.*type.*image/i.test(message);
+  if (!textOnly) return message;
+  return `the model "${model}" is text-only — it rejected the screenshot outright.\n`
+    + 'Point the critique at a model that can see, leaving the other steps as they are:\n'
+    + '  VISION_MODEL=claude-opus-4-8 LLM_PROVIDER=anthropic   (needs ANTHROPIC_API_KEY)\n'
+    + '  VISION_MODEL=gpt-4o LLM_PROVIDER=openai               (needs OPENAI_API_KEY)\n'
+    + '  VISION_MODEL=qwen2.5vl LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1   (free, local)\n'
+    + `Original error: ${message}`;
+}
+
 export function buildCritiquePrompt(brief, slotKeys = []) {
   return `You are reviewing SCREENSHOTS of a page that was just assembled, against the brief it was built from. Return ONLY one JSON object: {"verdict","score","matches_brief","findings":[{"severity","area","slot","viewport","what","fix"}]}.
 

@@ -13,6 +13,7 @@ const PREVIEW_SANDBOX = 'allow-scripts allow-same-origin allow-pointer-lock allo
 const INITIAL_SNAPSHOT: RuntimePreviewSnapshot = {
   phase: 'preparing',
   message: 'Đang chuẩn bị project…',
+  notice: null,
   logs: [],
   url: null,
   error: null,
@@ -60,6 +61,7 @@ export default function RuntimePreviewTab({
     <section className="pane pane-preview active">
       <div className="preview-toolbar">
         <span className="status">{snapshot.message}</span>
+        {snapshot.notice && <span className="status notice">{snapshot.notice}</span>}
         {readyUrl && (
           <>
             <button

@@ -3,11 +3,7 @@ import type {
   FileSystemTree,
   WebContainerProcess,
 } from '@webcontainer/api';
-import {
-  prepareRuntimeProject,
-  UnsupportedRuntimeError,
-  type RuntimeProject,
-} from './webcontainer-runtime.ts';
+import { prepareRuntimeProject, type RuntimeProject } from './webcontainer-runtime.ts';
 import type { ExtractedZip } from './zip.ts';
 
 export type RuntimePreviewPhase =
@@ -22,6 +18,8 @@ export type RuntimePreviewRecovery = 'retry' | 'reload';
 export interface RuntimePreviewSnapshot {
   phase: RuntimePreviewPhase;
   message: string;
+  /** Shown alongside the status when the preview had to deviate from the template. */
+  notice: string | null;
   logs: string[];
   url: string | null;
   error: string | null;
@@ -215,7 +213,7 @@ export async function runRuntimePreview({
   let phase: RuntimePreviewPhase = 'preparing';
   let url: string | null = null;
   let error: string | null = null;
-  let unsupported = false;
+  let notice: string | null = null;
   let recovery: RuntimePreviewRecovery | null = null;
   let cancelRun = () => {};
   const cancelled = new Promise<never>((_resolve, reject) => {
@@ -240,9 +238,8 @@ export async function runRuntimePreview({
     if (signal.aborted) return;
     onUpdate({
       phase,
-      message: phase === 'failure'
-        ? (unsupported ? String(error) : `Lỗi runtime: ${error}`)
-        : PHASE_MESSAGE[phase],
+      message: phase === 'failure' ? `Lỗi runtime: ${error}` : PHASE_MESSAGE[phase],
+      notice,
       logs: logs.snapshot(),
       url,
       error,
@@ -288,6 +285,10 @@ export async function runRuntimePreview({
   emit();
   try {
     const project = prepare(zip);
+    if (project.nextDowngradedTo) {
+      notice = `Preview chạy Next.js ${project.nextDowngradedTo} thay cho bản template khai báo `
+        + '(Next 16 không render được trong WebContainer).';
+    }
     let rejectRuntimeError: (reason: unknown) => void = () => {};
     const runtimeError = new Promise<never>((_resolve, reject) => { rejectRuntimeError = reject; });
 
@@ -367,12 +368,7 @@ export async function runRuntimePreview({
     if (runtimeFailure !== CANCELLED && !signal.aborted) {
       phase = 'failure';
       error = normalizeRuntimeError(runtimeFailure);
-      unsupported = runtimeFailure instanceof UnsupportedRuntimeError;
-      recovery = runtimeFailure instanceof BootTimeoutError
-        ? 'reload'
-        : runtimeFailure instanceof UnsupportedRuntimeError
-          ? null
-          : 'retry';
+      recovery = runtimeFailure instanceof BootTimeoutError ? 'reload' : 'retry';
       emit();
     }
   } finally {

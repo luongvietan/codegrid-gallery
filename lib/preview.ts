@@ -5,7 +5,7 @@ export type PreviewKind = 'legacy-html' | 'static' | 'runtime-required' | 'none'
 export type PreviewTab = 'preview' | 'code' | 'media';
 
 export function needsSourceZip(tab: PreviewTab, kind: PreviewKind): boolean {
-  return tab === 'code' || (tab === 'preview' && kind === 'legacy-html');
+  return tab === 'code' || (tab === 'preview' && (kind === 'legacy-html' || kind === 'runtime-required'));
 }
 
 export function previewKind(

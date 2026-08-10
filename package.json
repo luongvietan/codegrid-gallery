@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:pipeline": "tsx --test scripts/preview-classifier.test.mjs scripts/preview-builder.test.mjs scripts/preview-artifacts.test.mjs scripts/sync-lib.test.mjs scripts/backfill-previews.test.mjs lib/preview.test.mjs lib/webcontainer-runtime.test.mjs lib/webcontainer-preview.test.mjs"
+    "test:pipeline": "tsx --test scripts/preview-classifier.test.mjs scripts/preview-builder.test.mjs scripts/preview-artifacts.test.mjs scripts/sync-lib.test.mjs scripts/backfill-previews.test.mjs lib/preview.test.mjs lib/zip-proxy.test.mjs lib/webcontainer-runtime.test.mjs lib/webcontainer-preview.test.mjs"
   },
   "dependencies": {
     "@webcontainer/api": "^1.6.4",

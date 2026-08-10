@@ -2,30 +2,56 @@
 
 ## Theme
 
-Light, editorial product interface built from the tokens in `variables.css`.
+Dark, restrained product interface built from the tokens in `variables.css`. Surfaces stay quiet so project thumbnails carry visual interest.
 
 ## Color
 
-- Canvas: `--color-paper-white`
-- Secondary surface: `--color-fog-white`
-- Card surface: `--color-mist-gray`
-- Primary text: `--color-ink-black`
-- Muted text: `--color-slate-gray`
-- Accent surface: `--color-blush-peach`
-- Accent ink: `--color-sienna-brown`
+- Canvas: `--surface-void`
+- Lifted surface / cards: `--surface-surface-lift`
+- Chrome / toolbars: mix of `--surface-graphite` over void (see `--surface-2` in `app/globals.css`)
+- Hairline: `--color-graphite-hairline`
+- Primary text: `--color-bone-white`
+- Secondary text: `--color-smoke-gray`
+- Muted text: `--color-ash-gray`
+- Accent (actions, selection, focus): `--color-bone-white`
+- Accent hover: `--color-white`
+- On-accent text: `--color-void-black`
+- Semantic runtime accents: amber (HTML), pulse green (Vite), sky blue (React)
+
+Accent ≤ ~10% of the UI. Prefer solid fills over decorative gradients. Do not use neon glows or multi-layer glass.
 
 ## Typography
 
-Use `--font-sohne` for interface text and `--font-signifier` for the product title and project titles. System fallbacks remain mandatory because the proprietary faces may not be installed.
+- UI: `--font-inter` only (loaded via `next/font`)
+- Code: system `ui-monospace` stack (second face, code surfaces only)
+- Body / controls: `--text-body-sm` (14px) minimum for readable chrome
+- Scale and weights come from `variables.css`
 
 ## Shape
 
-Use 12–16px radii for cards and panels, pill radii for filters, and square-edged code surfaces. Prefer borders or compact shadows, not both as decoration.
+- Cards: `--radius-cards` (16px)
+- Inputs / buttons / badges: `--radius-inputs` / `--radius-buttons` / `--radius-badges` (6px)
+- Large panels: `--radius-large-panels` (24px)
+- Prefer a single border or a compact rim shadow (`--shadow-subtle`), not both as decoration
 
 ## Layout
 
-Constrain primary content to `--page-max-width`. Use a responsive auto-fit gallery, a sticky toolbar, and a full-screen modal on small screens.
+- Content max width: `--page-max-width` (1200px)
+- Sticky topbar: search + sort
+- Fixed bottom dock: pill stats/filters
+- Responsive auto-fit gallery grid
+- Full-viewport modal on small screens
 
 ## Motion
 
-Use 150–220ms state transitions. Respect `prefers-reduced-motion` and avoid decorative entrance sequences.
+- 160–200ms state transitions with ease-out
+- Motion for hover, focus, modal open, toast only
+- Respect `prefers-reduced-motion`
+- No decorative entrance choreography
+
+## Z-index
+
+- Sticky: 20
+- Modal backdrop: 40
+- Modal: 50
+- Toast: 80

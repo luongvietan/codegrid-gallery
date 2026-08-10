@@ -31,6 +31,9 @@ export default function ProjectModal({ p, onClose, onToast }: {
   const mountedRef = useRef(true);
   const loadRunRef = useRef(0);
   const currentProjectKeyRef = useRef(projectKey);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const titleId = 'project-modal-title';
 
   const tab = tabState.projectKey === projectKey ? tabState.tab : defaultTab;
   const zip = sourceState.projectKey === projectKey ? sourceState.zip : null;
@@ -47,13 +50,37 @@ export default function ProjectModal({ p, onClose, onToast }: {
   useEffect(() => {
     mountedRef.current = true;
     document.body.classList.add('modal-open');
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
     return () => {
       mountedRef.current = false;
       loadRunRef.current += 1;
       document.body.classList.remove('modal-open');
       document.removeEventListener('keydown', onKey);
+      previouslyFocused?.focus?.();
     };
   }, [onClose]);
 
@@ -97,23 +124,55 @@ export default function ProjectModal({ p, onClose, onToast }: {
   const sub = [p.date, p.author, p.folder].filter(Boolean).join(' · ');
 
   return (
-    <div className="modal">
-      <div className="modal-backdrop" onClick={onClose} />
-      <div className="modal-panel">
+    <div className="modal" role="presentation">
+      <div className="modal-backdrop" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={panelRef}
+        className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div className="modal-head">
           <div className="modal-title">
             <span className={`badge ${runtimeBucket(p)}`}>{runtimeLabel(p)}</span>
             <div className="modal-title-text">
-              <h2>{p.title}</h2>
+              <h2 id={titleId}>{p.title}</h2>
               <div className="modal-sub">{sub}</div>
             </div>
           </div>
-          <div className="modal-tabs">
-            {hasPreview && <button className={`tab ${tab === 'preview' ? 'active' : ''}`} onClick={() => selectTab('preview')}>Preview</button>}
-            <button className={`tab ${tab === 'code' ? 'active' : ''}`} onClick={() => selectTab('code')}>Code</button>
-            <button className={`tab ${tab === 'media' ? 'active' : ''}`} onClick={() => selectTab('media')}>Media</button>
+          <div className="modal-tabs" role="tablist" aria-label="Nội dung project">
+            {hasPreview && (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === 'preview'}
+                className={`tab ${tab === 'preview' ? 'active' : ''}`}
+                onClick={() => selectTab('preview')}
+              >
+                Preview
+              </button>
+            )}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'code'}
+              className={`tab ${tab === 'code' ? 'active' : ''}`}
+              onClick={() => selectTab('code')}
+            >
+              Code
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'media'}
+              className={`tab ${tab === 'media' ? 'active' : ''}`}
+              onClick={() => selectTab('media')}
+            >
+              Media
+            </button>
           </div>
-          <button className="close" onClick={onClose} aria-label="Đóng">✕</button>
+          <button ref={closeRef} type="button" className="close" onClick={onClose} aria-label="Đóng">✕</button>
         </div>
         <div className="modal-body">
           {tab === 'preview' && kind === 'static' && p.preview && <StaticPreviewTab preview={p.preview} />}

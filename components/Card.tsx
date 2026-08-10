@@ -63,7 +63,7 @@ export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) =
         className={`thumb ${thumbState}`}
         style={showThumb ? { backgroundImage: `url('${thumbSrc}')` } : undefined}
       >
-        {p.thumbnail ? '' : 'No preview'}
+        {p.thumbnail ? '' : 'Chưa có preview'}
         {visible && p.video && (
           <>
             <video

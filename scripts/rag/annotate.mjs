@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isTextFile } from '../ingest-lib.mjs';
 import { ENUMS, LLM_FIELDS, validateCard } from './schema.mjs';
-import { resolveLlm, createChat } from './llm.mjs';
+import { resolveLlm, createChat, extractJson } from './llm.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const MAX_SOURCE = 45000;
@@ -84,13 +84,6 @@ RULES:
 
 SOURCE:
 ${source}`;
-}
-
-function extractJson(text) {
-  let t = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
-  const s = t.indexOf('{'), e = t.lastIndexOf('}');
-  if (s === -1 || e === -1) throw new Error('no JSON object in response');
-  return JSON.parse(t.slice(s, e + 1));
 }
 
 async function annotateOne(chat, record, source, frameworkHint) {

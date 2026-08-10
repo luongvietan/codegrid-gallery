@@ -13,6 +13,7 @@
     "corpus:query": "node scripts/corpus-query.mjs",
     "learn": "node scripts/learn.mjs",
     "rag:annotate": "node scripts/rag/annotate.mjs",
+    "rag:techniques": "node scripts/rag/extract-techniques.mjs",
     "rag:embed": "node scripts/rag/embed.mjs",
     "rag:eval": "node scripts/rag/eval.mjs",
     "rag:search": "node scripts/rag/search.mjs"

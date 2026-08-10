@@ -61,11 +61,42 @@ filters (`--exclude-hijack`, `--exclude-lib locomotive`), not composer patches.
 
 | Step | Command | Needs |
 |---|---|---|
-| 0. Migrate | `psql < supabase/migrations/0001_codegrid_rag.sql` (or Supabase SQL editor) | a Supabase/Postgres project |
+| 0. Migrate | `psql < supabase/migrations/0001_codegrid_rag.sql`, then `0002_search_techniques.sql` | a Supabase/Postgres project |
 | 1. Annotate | `ANTHROPIC_API_KEY=… node scripts/rag/annotate.mjs --limit 20` | corpus + `@anthropic-ai/sdk` |
 | 2. Embed | `VOYAGE_API_KEY=… node scripts/rag/embed.mjs` (add `--supabase` to upsert) | an embedding key |
 | 3. **Eval (DB-free)** | `VOYAGE_API_KEY=… node scripts/rag/eval.mjs` | embedded cards on disk |
 | 4. Search | `node scripts/rag/search.mjs "dark editorial hero" --type hero --exclude-hijack` | cards (`--supabase` for the RPC) |
+| 5. Techniques | `node scripts/rag/extract-techniques.mjs` → `embed.mjs --techniques` → `search.mjs "…" --techniques` | cards + the same keys |
+
+## The technique pass (step 5)
+
+`extract-techniques.mjs` reads the component cards and mines the *mechanisms* out of
+them — "staggered char reveal", "pinned section with scrubbed timeline" — into
+`corpus/techniques/index.json`, then `component_techniques` links each back to the
+components that exhibit it (`seen_in`).
+
+Three decisions carry the whole pass:
+
+- **Sequential, not concurrent.** Every call is handed the vocabulary mined so far
+  and told to reuse a name verbatim when it matches. Run four workers in parallel and
+  the same technique gets four names — the index multiplies instead of converging.
+  Convergence *is* the product here, so the pass trades wall-clock for it.
+- **Prose is first-writer-wins; evidence accumulates.** `name`/`mechanism`/
+  `description` are frozen by the first card that mines a technique — they are what
+  gets embedded, so letting card #40 rewrite them would silently invalidate the
+  stored vector. `animation_libs`, `variations`, `retrieval_probes`, `seen_in`, and
+  `params` merge across every sighting; numeric params widen into `[min, max]`
+  ranges, which is the form the composer actually needs ("stagger lives between
+  0.02 and 0.05").
+- **Same validate-and-retry loop as the annotator.** Off-enum libs, fewer than 3
+  probes, nested `params` objects — all rejected client-side and fed back as errors,
+  so a weak free model still produces clean rows.
+
+Checkpointed after every card: re-running skips what is already mined (`--force` redoes).
+
+Retrieval filters on the stack only (`--lib`, `--exclude-lib`). A technique has no
+`scope` or `comp_type` on purpose — that absence is exactly why it transfers to
+content it was never written for.
 
 ### Run it 100% free / local (no API keys, no rate limits)
 
@@ -84,8 +115,13 @@ ollama pull bge-m3             # embeddings, dim 1024 (matches the migration)
 LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3-coder \
   node scripts/rag/annotate.mjs --limit 20
 
+# mine techniques with the same local model (same flags — one shared LLM layer)
+LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3-coder \
+  node scripts/rag/extract-techniques.mjs
+
 # embed + eval with the local embedding model
 EMBED_PROVIDER=ollama node scripts/rag/embed.mjs
+EMBED_PROVIDER=ollama node scripts/rag/embed.mjs --techniques
 EMBED_PROVIDER=ollama node scripts/rag/eval.mjs
 ```
 
@@ -125,9 +161,6 @@ re-annotate, not a migration.
 
 ## Not yet built (deliberate next passes)
 
-- **Technique extraction** — a second annotation pass that mines `techniques` rows from
-  the components (the "write fresh code" index). The table + join exist; the extractor
-  doesn't.
 - **Composer + normalize pass** — plan skeleton → retrieve per slot → normalize
   `design_tokens` → merge. This is where Frankenstein is actually prevented.
 - **Visual feedback loop** — Playwright screenshot → VLM critique → fix. This is what

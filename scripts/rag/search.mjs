@@ -9,19 +9,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { embedBatch, embedConfig } from './provider.mjs';
-import { rankLocal, buildRpcArgs } from './retrieval.mjs';
+import { rankLocal, rankTechniques, buildRpcArgs } from './retrieval.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function parseArgs(argv) {
-  const o = { corpus: path.join(ROOT, 'corpus'), terms: [], filters: {}, limit: 5, supabase: false };
+  const o = { corpus: path.join(ROOT, 'corpus'), terms: [], filters: {}, limit: 5, supabase: false, techniques: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--scope') o.filters.scope = argv[++i];
+    if (a === '--techniques') o.techniques = true;
+    else if (a === '--scope') o.filters.scope = argv[++i];
     else if (a === '--type') o.filters.compType = argv[++i];
     else if (a === '--aesthetic') o.filters.aesthetic = argv[++i].split(',');
     else if (a === '--exclude-hijack') o.filters.excludeSideEffects = [...(o.filters.excludeSideEffects || []), 'scroll_hijack'];
     else if (a === '--exclude-lib') o.filters.excludeAnimLibs = [...(o.filters.excludeAnimLibs || []), ...argv[++i].split(',')];
+    else if (a === '--lib') o.filters.animLibs = [...(o.filters.animLibs || []), ...argv[++i].split(',')];
     else if (a === '--limit') o.limit = Math.max(1, +argv[++i] || 5);
     else if (a === '--supabase') o.supabase = true;
     else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
@@ -35,6 +37,43 @@ async function main() {
   const query = opts.terms.join(' ').trim();
   if (!query) { console.error('Usage: node scripts/rag/search.mjs "<brief>" [--scope] [--type] [--aesthetic a,b] [--exclude-hijack] [--exclude-lib x,y] [--supabase]'); process.exit(2); }
   const [qvec] = await embedBatch([query]);
+
+  // Technique index — "invent a new site": retrieve the mechanism, write fresh
+  // code, then read the seen_in components for exact syntax.
+  if (opts.techniques) {
+    const file = path.join(opts.corpus, 'techniques', 'index.json');
+    let techniques = [];
+    if (opts.supabase) {
+      const url = process.env.SUPABASE_URL, key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) { console.error('Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY'); process.exit(1); }
+      let createClient;
+      try { ({ createClient } = await import('@supabase/supabase-js')); } catch { console.error('Run: npm i @supabase/supabase-js'); process.exit(1); }
+      const supabase = createClient(url, key);
+      const { data, error } = await supabase.rpc('search_techniques', {
+        query_embedding: qvec,
+        f_anim_libs: opts.filters.animLibs ?? null,
+        f_exclude_anim_libs: opts.filters.excludeAnimLibs?.length ? opts.filters.excludeAnimLibs : null,
+        match_limit: opts.limit,
+      });
+      if (error) { console.error(`RPC failed: ${error.message}`); process.exit(1); }
+      console.log(`"${query}" — top ${data.length} technique(s):\n`);
+      for (const t of data) console.log(`  ${t.id}  sim=${(t.sim ?? 0).toFixed(3)}\n      ${t.mechanism}`);
+      return;
+    }
+    if (!fs.existsSync(file)) { console.error('No techniques. Run: node scripts/rag/extract-techniques.mjs + embed.mjs --techniques'); process.exit(1); }
+    const cfg = embedConfig();
+    const reg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    techniques = Object.values(reg.techniques || {}).filter((t) => Array.isArray(t.embedding) && t.embedding.length === cfg.dim);
+    if (!techniques.length) { console.error('No embedded techniques. Run: node scripts/rag/embed.mjs --techniques'); process.exit(1); }
+    const ranked = rankTechniques(techniques, qvec, opts.filters, opts.limit);
+    console.log(`"${query}" — top ${ranked.length} technique(s):\n`);
+    for (const { card: t, sim } of ranked) {
+      console.log(`  ${t.id}  sim=${sim.toFixed(3)}  (seen in ${t.seen_in.length}: ${t.seen_in.slice(0, 3).join(', ')})`);
+      console.log(`      ${t.mechanism}`);
+      console.log(`      params: ${JSON.stringify(t.params)}`);
+    }
+    return;
+  }
 
   let results;
   if (opts.supabase) {

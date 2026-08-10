@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { selectDiverse, cosine, applyFilters, rankLocal, buildRpcArgs, topKHit } from './retrieval.mjs';
+import { selectDiverse, cosine, applyFilters, rankLocal, rankTechniques, buildRpcArgs, topKHit } from './retrieval.mjs';
 
 const card = (id, over = {}) => ({
   id, comp_type: 'hero', framework: 'vanilla', animation_libs: ['gsap'],
@@ -47,6 +47,21 @@ test('rankLocal filters then orders by cosine and honors limit', () => {
   const ranked = rankLocal(cards, [1, 0, 0], { compType: 'hero' }, 5);
   assert.deepEqual(ranked.map((r) => r.card.id), ['near', 'far']); // 'wrong' filtered out
   assert.ok(ranked[0].sim > ranked[1].sim);
+});
+
+test('rankTechniques filters on stack only, then orders by cosine', () => {
+  const t = (id, libs, emb) => ({ id, animation_libs: libs, embedding: emb, seen_in: ['src_001'] });
+  const techniques = [
+    t('tech_a', ['gsap'], [1, 0, 0]),
+    t('tech_b', ['gsap'], [0.7, 0.7, 0]),
+    t('tech_c', ['locomotive'], [1, 0, 0]),
+    t('tech_d', ['three'], [1, 0, 0]),
+  ];
+  const ranked = rankTechniques(techniques, [1, 0, 0], { excludeAnimLibs: ['locomotive'] }, 5);
+  assert.deepEqual(ranked.map((r) => r.card.id), ['tech_a', 'tech_d', 'tech_b']);
+
+  const only = rankTechniques(techniques, [1, 0, 0], { animLibs: ['three'] }, 5);
+  assert.deepEqual(only.map((r) => r.card.id), ['tech_d']);
 });
 
 test('buildRpcArgs maps a brief to nullable RPC args', () => {

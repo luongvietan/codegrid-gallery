@@ -59,6 +59,22 @@ export function rankLocal(cards, queryEmbedding, f = {}, limit = 5) {
     .slice(0, limit);
 }
 
+/** Technique-index ranking. The only hard filters that make sense here are on the
+ *  stack (`animLibs` / `excludeAnimLibs`) — a technique has no scope or comp_type,
+ *  which is exactly why it transfers to content it was never written for. */
+export function rankTechniques(techniques, queryEmbedding, f = {}, limit = 5) {
+  const overlaps = (arr, list) => Array.isArray(arr) && arr.some((x) => list.includes(x));
+  return techniques
+    .filter((t) => {
+      if (f.animLibs && f.animLibs.length && !overlaps(t.animation_libs, f.animLibs)) return false;
+      if (f.excludeAnimLibs && f.excludeAnimLibs.length && overlaps(t.animation_libs, f.excludeAnimLibs)) return false;
+      return true;
+    })
+    .map((t) => ({ card: t, sim: cosine(queryEmbedding, t.embedding) }))
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, limit);
+}
+
 /** Map a brief's filter object to the Supabase RPC argument names (null = skip). */
 export function buildRpcArgs(f = {}, limit = 5) {
   return {

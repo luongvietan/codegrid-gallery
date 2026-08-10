@@ -11,6 +11,14 @@
 //   LLM_PROVIDER=openai LLM_BASE_URL=https://openrouter.ai/api/v1 \
 //     LLM_API_KEY=sk-or-... LLM_MODEL=qwen/qwen3-coder:free node scripts/rag/annotate.mjs
 
+/** Pull the one JSON object out of a model reply (fence, prose, or both). Pure. */
+export function extractJson(text) {
+  const t = String(text ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+  const s = t.indexOf('{'), e = t.lastIndexOf('}');
+  if (s === -1 || e === -1 || e < s) throw new Error('no JSON object in response');
+  return JSON.parse(t.slice(s, e + 1));
+}
+
 /** Resolve LLM config from env. Pure (env in, config out) — unit-tested. */
 export function resolveLlm(env = process.env) {
   const provider = env.LLM_PROVIDER || 'anthropic';

@@ -1,4 +1,4 @@
-import { assetUrl } from './assets.ts';
+import { proxiedAssetUrl } from './assets.ts';
 import type { PreviewManifest, Project } from './types.ts';
 
 export type PreviewKind = 'legacy-html' | 'static' | 'runtime-required' | 'none';
@@ -34,7 +34,13 @@ export function hasPreviewTab(project: Pick<Project, 'type' | 'entryHtml' | 'pre
   return previewKind(project) !== 'none';
 }
 
+/**
+ * Framed through the same-origin asset proxy on purpose: the page is cross-origin isolated for
+ * WebContainer, and COEP blocks a cross-origin nested document unless it sends COEP or CORP,
+ * which the public asset bucket does not. Relative assets inside the artifact resolve under the
+ * same proxied path.
+ */
 export function staticPreviewUrl(preview: Pick<PreviewManifest, 'sourceHash' | 'entry'>): string {
   if (!preview.sourceHash || !preview.entry) throw new Error('Static preview manifest is incomplete');
-  return assetUrl(`previews/${preview.sourceHash}`, preview.entry);
+  return proxiedAssetUrl(`previews/${preview.sourceHash}`, preview.entry);
 }

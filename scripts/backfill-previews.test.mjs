@@ -38,6 +38,20 @@ test('selectBackfillBatch uses stable folder order, skips known Next types, and 
   );
 });
 
+test('selectBackfillBatch builds bundler projects before archives that already preview from source', () => {
+  const projects = [
+    { id: 'html-early', folder: '2023-01_html', type: 'html', runtime: 'html' },
+    { id: 'vite-late', folder: '2026-07_vite', type: 'react', runtime: 'vite-vanilla' },
+    { id: 'cra-late', folder: '2026-08_cra', type: 'react', runtime: 'cra' },
+    { id: 'html-late', folder: '2026-09_html', type: 'html', runtime: 'html' },
+  ];
+
+  assert.deepEqual(
+    selectBackfillBatch(projects, 4).map((project) => project.id),
+    ['vite-late', 'cra-late', 'html-early', 'html-late'],
+  );
+});
+
 test('selectBackfillBatch advances untouched projects before retrying an earlier failed batch', () => {
   let projects = [
     { id: 'a', folder: 'a', type: 'react' },

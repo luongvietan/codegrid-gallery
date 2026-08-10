@@ -61,11 +61,16 @@ export function selectBackfillBatch(projects, limit) {
       project,
       position,
       attemptPriority: project.preview == null ? 0 : 1,
+      // A bundler project cannot run from source in the browser — its bare imports never
+      // resolve — so it stays visibly broken until this build lands. Plain HTML archives
+      // already preview fine and only gain lazier loading, so they wait their turn.
+      runtimePriority: isStaticBuildRuntime(project.runtime) ? 0 : 1,
     }))
     .sort((left, right) => {
       const leftFolder = String(left.project.folder ?? '');
       const rightFolder = String(right.project.folder ?? '');
       return left.attemptPriority - right.attemptPriority
+        || left.runtimePriority - right.runtimePriority
         || (leftFolder < rightFolder ? -1 : leftFolder > rightFolder ? 1 : 0)
         || left.position - right.position;
     })

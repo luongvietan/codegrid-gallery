@@ -12,7 +12,7 @@
 // where R2 is reachable, not inside an egress-restricted sandbox.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isTextFile } from '../ingest-lib.mjs';
 import { ENUMS, LLM_FIELDS, validateCard } from './schema.mjs';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
@@ -34,7 +34,7 @@ function parseArgs(argv) {
   return o;
 }
 
-function gatherSource(dir, record) {
+export function gatherSource(dir, record) {
   const files = (record.files || []).map((f) => f.path);
   const entry = record.entryHtml && files.includes(record.entryHtml) ? record.entryHtml : null;
   const ordered = [entry, ...files.filter((p) => p !== entry)].filter(Boolean);
@@ -55,7 +55,7 @@ function gatherSource(dir, record) {
 
 function enumList(key) { return ENUMS[key].join(', '); }
 
-function buildPrompt(record, source, frameworkHint) {
+export function buildPrompt(record, source, frameworkHint) {
   return `You are indexing a front-end component rebuilt from an awwwards-style site so an AI can later find and reassemble it. Read ALL the code, then return ONLY one JSON object (no markdown fence, no prose) with EXACTLY these keys: ${LLM_FIELDS.join(', ')}.
 
 Framework hint (from the archive): ${frameworkHint}. Title: ${record.title ?? record.id}. Entry: ${record.entryHtml ?? '(none)'}.
@@ -149,4 +149,9 @@ async function main() {
   console.log(`\nCards in ${path.relative(ROOT, cardsDir)}/. Next: node scripts/rag/embed.mjs`);
 }
 
-main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });
+// Exported for probes and tests; guard so importing does not start a run.
+export { FRAMEWORK_HINT };
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exitCode = 1; });
+}

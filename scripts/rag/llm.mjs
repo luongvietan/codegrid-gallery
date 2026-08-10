@@ -59,10 +59,20 @@ export function resolveLlm(env = process.env) {
  *  `reasoningEffort` is the cost lever on thinking models: DeepSeek v4 spends
  *  thousands of tokens reasoning per annotation, which over 422 sources is real
  *  money and real latency. Omitted unless asked for, so plain models are unaffected. */
-export function openaiPayload(messages, model, maxTokens, reasoningEffort = '') {
-  const body = { model, max_tokens: maxTokens, messages, stream: false };
+export function openaiPayload(messages, model, maxTokens, reasoningEffort = '', tokenField = 'max_tokens') {
+  const body = { model, [tokenField]: maxTokens, messages, stream: false };
   if (reasoningEffort) body.reasoning_effort = reasoningEffort;
   return body;
+}
+
+/**
+ * Newer OpenAI models reject `max_tokens` outright and name their replacement in
+ * the error. Rather than keep a list of which model wants which field — a list
+ * that is wrong the day a model ships — read the instruction out of the refusal.
+ */
+export function tokenFieldFromError(message) {
+  const m = /use '?(max_completion_tokens|max_tokens)'? instead/i.exec(String(message ?? ''));
+  return m ? m[1] : null;
 }
 
 /**
@@ -96,13 +106,24 @@ export async function createChat(cfg) {
     };
   }
   // openai-compatible (Ollama / OpenRouter / DashScope / LM Studio / OpenAI)
+  // Learned once per chat, not per call: the first refusal tells us which token
+  // field this model wants, and every later call uses it.
+  let tokenField = cfg.tokenField || 'max_tokens';
+  const post = (messages, maxTokens) => fetch(`${cfg.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
+    body: JSON.stringify(openaiPayload(messages, cfg.model, maxTokens, cfg.reasoningEffort, tokenField)),
+  });
   return async (messages, maxTokens) => {
-    const resp = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
-      body: JSON.stringify(openaiPayload(messages, cfg.model, maxTokens, cfg.reasoningEffort)),
-    });
-    if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+    let resp = await post(messages, maxTokens);
+    if (!resp.ok) {
+      const body = await resp.text();
+      const wanted = tokenFieldFromError(body);
+      if (!wanted || wanted === tokenField) throw new Error(`LLM HTTP ${resp.status}: ${body.slice(0, 300)}`);
+      tokenField = wanted;
+      resp = await post(messages, maxTokens);
+      if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+    }
     return readChoice(await resp.json(), maxTokens);
   };
 }

@@ -268,6 +268,6 @@ export { writeProject, writeCorpus, renderCorpusMd, renderAgentsMd };
 // pathToFileURL, not string concatenation: on Windows argv[1] is `C:\...`, which
 // never equals import.meta.url's `file:///C:/...` — the script would exit 0 in
 // silence, having done nothing.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });
 }

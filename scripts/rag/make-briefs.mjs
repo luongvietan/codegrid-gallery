@@ -151,6 +151,6 @@ async function main() {
 
 // This module exports helpers that the tests import, so it must not run main()
 // on import. pathToFileURL, not string concatenation — see scripts/ingest.mjs.
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });
 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveLlm, openaiPayload, readChoice } from './llm.mjs';
+import { resolveLlm, openaiPayload, readChoice, tokenFieldFromError } from './llm.mjs';
 import { embedConfig, backoffMs } from './provider.mjs';
 
 test('resolveLlm defaults to anthropic claude-opus-4-8', () => {
@@ -31,6 +31,21 @@ test('resolveLlm: deepseek is the openai transport with its own endpoint and key
   assert.equal(cfg.model, 'deepseek-v4-flash');
   // LLM_MODEL still wins — the account decides which model id is current.
   assert.equal(resolveLlm({ LLM_PROVIDER: 'deepseek', LLM_MODEL: 'deepseek-v4-pro' }).model, 'deepseek-v4-pro');
+});
+
+test('openaiPayload can name the token field the model demands', () => {
+  const p = openaiPayload([{ role: 'user', content: 'hi' }], 'gpt-5.6-luna', 500, '', 'max_completion_tokens');
+  assert.equal(p.max_completion_tokens, 500);
+  assert.equal(p.max_tokens, undefined);
+});
+
+test('tokenFieldFromError reads the replacement out of the refusal', () => {
+  // Verbatim from gpt-5.6-luna. Keeping a list of which model wants which field
+  // would be wrong the day a new model ships; the error already says.
+  assert.equal(tokenFieldFromError("Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."), 'max_completion_tokens');
+  assert.equal(tokenFieldFromError('use max_tokens instead'), 'max_tokens');
+  assert.equal(tokenFieldFromError('rate limited'), null);
+  assert.equal(tokenFieldFromError(undefined), null);
 });
 
 test('readChoice returns the text when there is one', () => {

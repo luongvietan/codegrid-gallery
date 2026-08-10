@@ -1,7 +1,7 @@
 import { assetUrl } from './assets.ts';
 import type { PreviewManifest, Project } from './types.ts';
 
-export type PreviewKind = 'legacy-html' | 'static' | 'none';
+export type PreviewKind = 'legacy-html' | 'static' | 'runtime-required' | 'none';
 export type PreviewTab = 'preview' | 'code' | 'media';
 
 export function needsSourceZip(tab: PreviewTab, kind: PreviewKind): boolean {
@@ -20,11 +20,17 @@ export function previewKind(
     return 'static';
   }
 
-  if (project.type === 'html' && project.entryHtml) return 'legacy-html';
+  if (project.entryHtml) return 'legacy-html';
+  if (project.type === 'react' || project.type === 'nextjs') return 'runtime-required';
   return 'none';
 }
 
 export function hasReadyPreview(project: Pick<Project, 'type' | 'entryHtml' | 'preview'>): boolean {
+  const kind = previewKind(project);
+  return kind === 'static' || kind === 'legacy-html';
+}
+
+export function hasPreviewTab(project: Pick<Project, 'type' | 'entryHtml' | 'preview'>): boolean {
   return previewKind(project) !== 'none';
 }
 

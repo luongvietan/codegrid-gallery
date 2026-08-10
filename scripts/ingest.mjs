@@ -66,7 +66,7 @@ function writeProject(buf, item, out) {
   fs.rmSync(dir, { recursive: true, force: true });
   const entries = extractZip(buf);
   const dataByName = new Map(entries.map((e) => [e.name, e]));
-  const { kept, skipped } = partitionEntries(entries.map((e) => ({ name: e.name, size: e.size })));
+  const { kept, assets, skipped } = partitionEntries(entries.map((e) => ({ name: e.name, size: e.size })));
 
   const written = [];
   const failed = [];
@@ -80,6 +80,20 @@ function writeProject(buf, item, out) {
     written.push({ path: rel, lang: k.lang, size: e.data.length });
   }
 
+  // Images ride along so an assembled page can be SEEN. They are written beside
+  // the source but recorded separately: nothing upstream reads them, and letting
+  // them into `files` would put binary into the annotator's prompt.
+  const images = [];
+  for (const a of assets) {
+    const e = dataByName.get(a.name);
+    const rel = safeRelPath(a.name);
+    if (!rel || !e || e.data == null) { failed.push({ name: a.name, error: e?.error || 'unsafe path' }); continue; }
+    const dest = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, e.data);
+    images.push({ path: rel, size: e.data.length });
+  }
+
   const sum = summarizeProject(written.map((w) => ({ size: w.size, lang: w.lang })));
   const record = {
     id: item.id, folder: item.folder, title: item.title ?? null, type: item.type,
@@ -87,6 +101,8 @@ function writeProject(buf, item, out) {
     zipBytes: buf.length, expectedZipBytes: item.expectedZipBytes ?? null,
     fileCount: sum.fileCount, textBytes: sum.textBytes, byLang: sum.byLang,
     skippedBinary: skipped.length, failed,
+    imageCount: images.length, imageBytes: images.reduce((n, i) => n + i.size, 0),
+    images: images.sort((a, b) => a.path.localeCompare(b.path)),
     files: written.sort((a, b) => a.path.localeCompare(b.path)),
   };
   fs.writeFileSync(path.join(dir, '.ingest.json'), JSON.stringify(record));

@@ -111,16 +111,18 @@ test('extractZip throws on a non-zip buffer', () => {
   assert.throws(() => extractZip(Buffer.from('not a zip at all')), /EOCD not found/);
 });
 
-test('partitionEntries splits kept text vs junk vs binary', () => {
-  const { kept, skipped } = partitionEntries([
+test('partitionEntries splits kept text vs assets vs junk vs binary', () => {
+  const { kept, assets, skipped } = partitionEntries([
     { name: 'index.html', size: 10 },
     { name: 'style.css', size: 20 },
     { name: 'img/logo.png', size: 999 },
+    { name: 'media/clip.mp4', size: 999 },
     { name: '__MACOSX/._x', size: 1 },
     { name: 'node_modules/x/y.js', size: 500 },
   ]);
   assert.deepEqual(kept.map((k) => k.name).sort(), ['index.html', 'style.css']);
   assert.equal(kept.find((k) => k.name === 'style.css').lang, 'CSS');
+  assert.deepEqual(assets.map((a) => a.name), ['img/logo.png']);   // images are kept now
   assert.deepEqual(
     skipped.map((s) => s.reason).sort(),
     ['binary', 'junk', 'junk'],
@@ -181,4 +183,24 @@ test('humanBytes formats across units', () => {
   assert.equal(humanBytes(1536), '1.5 KB');
   assert.equal(humanBytes(3_757_291_006), '3.50 GB');
   assert.equal(humanBytes(null), '—');
+});
+
+test('partitionEntries keeps images, still drops video and fonts', () => {
+  // A critique reviews what it can see; a page whose artwork was stripped at
+  // ingest reads as broken however good the layout is.
+  const { kept, assets, skipped } = partitionEntries([
+    { name: 'index.html', size: 10 },
+    { name: 'img/hero.jpg', size: 50_000 },
+    { name: 'img/logo.PNG', size: 2_000 },
+    { name: 'media/reel.mp4', size: 900_000 },
+    { name: 'fonts/x.woff2', size: 40_000 },
+    { name: 'img/huge.png', size: 9_000_000 },
+    { name: '__MACOSX/junk.png', size: 10 },
+  ]);
+  assert.deepEqual(kept.map((f) => f.name), ['index.html']);
+  assert.deepEqual(assets.map((f) => f.name), ['img/hero.jpg', 'img/logo.PNG']);
+  assert.deepEqual(
+    skipped.map((f) => `${f.name}:${f.reason}`),
+    ['media/reel.mp4:binary', 'fonts/x.woff2:binary', 'img/huge.png:image too large', '__MACOSX/junk.png:junk'],
+  );
 });

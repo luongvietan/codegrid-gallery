@@ -56,6 +56,17 @@ export function isTextFile(name) {
   return TEXT_EXT.has(extOf(name));
 }
 
+// Images are kept; video, fonts, audio and 3D models are not. A critique of an
+// assembled page reviews what it can see, and a page whose artwork was stripped
+// at ingest reads as broken however good the layout is. The rest stays out: they
+// are large, and nothing downstream looks at them.
+const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif', 'ico', 'bmp']);
+export const MAX_IMAGE_BYTES = 2_000_000;
+
+export function isImageFile(name) {
+  return IMAGE_EXT.has(extOf(name));
+}
+
 const LANG_BY_EXT = {
   html: 'HTML', htm: 'HTML',
   css: 'CSS', scss: 'SCSS', sass: 'Sass', less: 'Less', styl: 'Stylus',
@@ -154,15 +165,21 @@ export function humanBytes(n) {
 
 /** Split extracted entries into kept text files vs. skipped (junk / binary),
  *  attaching language + byte tallies. `files` are shaped { name, size }. */
-export function partitionEntries(files) {
+export function partitionEntries(files, maxImageBytes = MAX_IMAGE_BYTES) {
   const kept = [];
+  const assets = [];
   const skipped = [];
   for (const f of files) {
     if (isJunkPath(f.name)) { skipped.push({ ...f, reason: 'junk' }); continue; }
-    if (!isTextFile(f.name)) { skipped.push({ ...f, reason: 'binary' }); continue; }
-    kept.push({ name: f.name, size: f.size, lang: langOf(f.name) });
+    if (isTextFile(f.name)) { kept.push({ name: f.name, size: f.size, lang: langOf(f.name) }); continue; }
+    if (isImageFile(f.name)) {
+      if ((f.size || 0) > maxImageBytes) { skipped.push({ ...f, reason: 'image too large' }); continue; }
+      assets.push({ name: f.name, size: f.size });
+      continue;
+    }
+    skipped.push({ ...f, reason: 'binary' });
   }
-  return { kept, skipped };
+  return { kept, assets, skipped };
 }
 
 /** Per-project rollup from the kept text files. */

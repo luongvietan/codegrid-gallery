@@ -43,7 +43,8 @@ test('ingest pipeline: extract → write source → manifest + docs (offline)', 
     const htmlZip = makeZip([
       { name: 'index.html', data: '<h1>Hello</h1>' },
       { name: 'css/style.css', data: 'body{margin:0}' },
-      { name: 'assets/hero.png', data: 'PNGDATA' },       // binary → skipped
+      { name: 'assets/hero.png', data: 'PNGDATA' },       // image → kept as an asset
+      { name: 'media/reel.mp4', data: 'MP4DATA' },        // video → skipped
       { name: '__MACOSX/._index.html', data: 'junk' },    // junk → skipped
     ]);
     const reactZip = makeZip([
@@ -58,11 +59,15 @@ test('ingest pipeline: extract → write source → manifest + docs (offline)', 
     // Source files landed on disk; junk/binary/deps did not.
     assert.equal(fs.readFileSync(path.join(out, 'p_html', 'index.html'), 'utf8'), '<h1>Hello</h1>');
     assert.equal(fs.readFileSync(path.join(out, 'p_html', 'css', 'style.css'), 'utf8'), 'body{margin:0}');
-    assert.ok(!fs.existsSync(path.join(out, 'p_html', 'assets', 'hero.png')));
+    // Images ride along so an assembled page can be seen; video still does not.
+    assert.equal(fs.readFileSync(path.join(out, 'p_html', 'assets', 'hero.png'), 'utf8'), 'PNGDATA');
+    assert.ok(!fs.existsSync(path.join(out, 'p_html', 'media', 'reel.mp4')));
     assert.ok(!fs.existsSync(path.join(out, 'p_react', 'node_modules')));
 
-    assert.equal(r1.fileCount, 2);
-    assert.equal(r1.skippedBinary, 2);           // png + __MACOSX
+    assert.equal(r1.fileCount, 2);               // text only — an image must never
+    assert.equal(r1.imageCount, 1);              // reach the annotator's prompt
+    assert.ok(!r1.files.some((f) => f.path.endsWith('.png')));
+    assert.equal(r1.skippedBinary, 2);           // mp4 + __MACOSX
     assert.deepEqual(r1.byLang, { HTML: 1, CSS: 1 });
     assert.equal(r2.fileCount, 2);               // App.jsx + package.json
     assert.equal(r2.skippedBinary, 1);           // node_modules entry

@@ -28,11 +28,31 @@ export interface ExtractedZip {
   files: Map<string, ArrayBuffer>;
 }
 
-const MAX_COMPRESSED_BYTES = 32 * 1024 * 1024;
+// Sized against the real gallery: the largest published archive is ~120 MB compressed and
+// several media-heavy templates carry single video files well past 16 MB. The expanded budget
+// stays adaptive so a small archive still cannot expand into a zip bomb.
+const MAX_COMPRESSED_BYTES = 192 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 4_000;
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_EXPANDED_BYTES = 128 * 1024 * 1024;
+const MAX_FILE_BYTES = 128 * 1024 * 1024;
+const MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
+const MIN_EXPANDED_BYTES = 64 * 1024 * 1024;
+const MAX_EXPANSION_RATIO = 20;
 const ZIP_SAFETY_ERROR = 'ZIP vượt quá giới hạn an toàn.';
+
+export const ZIP_LIMITS = {
+  maxCompressedBytes: MAX_COMPRESSED_BYTES,
+  maxArchiveEntries: MAX_ARCHIVE_ENTRIES,
+  maxFileBytes: MAX_FILE_BYTES,
+  maxExpandedBytes: MAX_EXPANDED_BYTES,
+  minExpandedBytes: MIN_EXPANDED_BYTES,
+  maxExpansionRatio: MAX_EXPANSION_RATIO,
+} as const;
+
+/** Expanded output allowed for an archive of this compressed size. */
+export function expandedBudget(compressedBytes: number): number {
+  const ratioBudget = Math.max(MIN_EXPANDED_BYTES, compressedBytes * MAX_EXPANSION_RATIO);
+  return Math.min(MAX_EXPANDED_BYTES, ratioBudget);
+}
 
 function safetyError(): never {
   throw new Error(ZIP_SAFETY_ERROR);
@@ -44,7 +64,11 @@ function includedSourcePath(relativePath: string): boolean {
     && !/(^|\/)(\.git|node_modules|\.next)\//.test(relativePath);
 }
 
-function extractBounded(entry: ZipEntry, previouslyExpandedBytes: number): Promise<ArrayBuffer> {
+function extractBounded(
+  entry: ZipEntry,
+  previouslyExpandedBytes: number,
+  budget: number,
+): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {
     const chunks: Uint8Array[] = [];
     let fileBytes = 0;
@@ -62,7 +86,7 @@ function extractBounded(entry: ZipEntry, previouslyExpandedBytes: number): Promi
       .on('data', (chunk) => {
         if (settled) return;
         fileBytes += chunk.byteLength;
-        if (fileBytes > MAX_FILE_BYTES || previouslyExpandedBytes + fileBytes > MAX_EXPANDED_BYTES) {
+        if (fileBytes > MAX_FILE_BYTES || previouslyExpandedBytes + fileBytes > budget) {
           rejectOnce(new Error(ZIP_SAFETY_ERROR));
           return;
         }
@@ -131,6 +155,7 @@ export async function fetchAndExtractZip(folder: string, zipName: string): Promi
   const contentLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(contentLength) && contentLength > MAX_COMPRESSED_BYTES) return safetyError();
   const buf = await readCompressedZip(response);
+  const budget = expandedBudget(buf.byteLength);
   const zip = await JSZip.loadAsync(buf);
   const entries: Array<{ relativePath: string; entry: ZipEntry }> = [];
   let entryCount = 0;
@@ -146,7 +171,7 @@ export async function fetchAndExtractZip(folder: string, zipName: string): Promi
         return safetyError();
       }
       declaredExpandedBytes += declaredSize;
-      if (declaredExpandedBytes > MAX_EXPANDED_BYTES) return safetyError();
+      if (declaredExpandedBytes > budget) return safetyError();
     }
     entries.push({ relativePath, entry });
   });
@@ -155,7 +180,7 @@ export async function fetchAndExtractZip(folder: string, zipName: string): Promi
   const files = new Map<string, ArrayBuffer>();
   let expandedBytes = 0;
   for (const { relativePath, entry } of entries) {
-    const contents = await extractBounded(entry, expandedBytes);
+    const contents = await extractBounded(entry, expandedBytes, budget);
     expandedBytes += contents.byteLength;
     names.push(relativePath);
     files.set(relativePath, contents);

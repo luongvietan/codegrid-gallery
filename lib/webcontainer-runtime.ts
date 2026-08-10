@@ -15,6 +15,13 @@ export const RUNTIME_PROJECT_ERROR = 'Runtime project is invalid or unsupported.
 const IGNORED_DIRECTORIES = new Set(['.git', '.next', 'node_modules']);
 const PROTOTYPE_POLLUTING_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
 
+function nextRangeGuaranteesWebpack(range: string): boolean {
+  const match = range.trim().match(
+    /^(?:\^|~|>=)?\s*v?(\d+)(?:\.\d+)?(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/,
+  );
+  return match !== null && Number.parseInt(match[1], 10) >= 16;
+}
+
 function invalidProject(): never {
   throw new Error(RUNTIME_PROJECT_ERROR);
 }
@@ -73,7 +80,7 @@ function packageManifest(contents: ArrayBuffer): {
   scripts: Record<string, string>;
   packageManager: string | null;
   hasNextDependency: boolean;
-  nextMajor: number | null;
+  nextRangeGuaranteesWebpack: boolean;
 } {
   let parsed: unknown;
   try {
@@ -99,12 +106,11 @@ function packageManifest(contents: ArrayBuffer): {
         : null
     ))
     .find((version): version is string => typeof version === 'string') ?? null;
-  const nextMajorMatch = nextVersion?.trim().match(/^[~^<>=v\s]*(\d+)/);
   return {
     scripts: Object.fromEntries(validScripts),
     packageManager: typeof packageManager === 'string' ? packageManager : null,
     hasNextDependency: nextVersion !== null,
-    nextMajor: nextMajorMatch ? Number.parseInt(nextMajorMatch[1], 10) : null,
+    nextRangeGuaranteesWebpack: nextVersion !== null && nextRangeGuaranteesWebpack(nextVersion),
   };
 }
 
@@ -151,7 +157,7 @@ function commandsFor(
   const serverArgs = isNextDev || /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
     ? ['--hostname', '0.0.0.0']
     : [];
-  if (isNextDev && pkg.nextMajor !== null && pkg.nextMajor >= 16) serverArgs.push('--webpack');
+  if (isNextDev && pkg.nextRangeGuaranteesWebpack) serverArgs.push('--webpack');
   if (usesPnpm) {
     return {
       installCommand: hasPnpmLock

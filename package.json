@@ -16,7 +16,8 @@
     "rag:techniques": "node scripts/rag/extract-techniques.mjs",
     "rag:embed": "node scripts/rag/embed.mjs",
     "rag:eval": "node scripts/rag/eval.mjs",
-    "rag:search": "node scripts/rag/search.mjs"
+    "rag:search": "node scripts/rag/search.mjs",
+    "rag:compose": "node scripts/rag/compose.mjs"
   },
   "dependencies": {
     "next": "16.2.9",

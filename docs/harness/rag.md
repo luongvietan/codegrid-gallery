@@ -67,6 +67,7 @@ filters (`--exclude-hijack`, `--exclude-lib locomotive`), not composer patches.
 | 3. **Eval (DB-free)** | `VOYAGE_API_KEY=… node scripts/rag/eval.mjs` | embedded cards on disk |
 | 4. Search | `node scripts/rag/search.mjs "dark editorial hero" --type hero --exclude-hijack` | cards (`--supabase` for the RPC) |
 | 5. Techniques | `node scripts/rag/extract-techniques.mjs` → `embed.mjs --techniques` → `search.mjs "…" --techniques` | cards + the same keys |
+| 6. Compose | `node scripts/rag/compose.mjs "dark editorial studio site"` | embedded cards (+ techniques) |
 
 ## The technique pass (step 5)
 
@@ -159,9 +160,41 @@ re-annotate, not a migration.
 - **Which Supabase project.** The migration is a file on purpose — run it against a
   dedicated codegrid project you create, not an unrelated one.
 
+## The composer (step 6)
+
+`compose.mjs` turns a brief into a page: plan skeleton (LLM, validated against the
+same enums) → retrieve per slot → **budget** → **normalize** → `BUILD.md` + `plan.json`
+under `corpus/compositions/<title>/`. It emits *decisions*, not a finished site — the
+code merge is left to the agent that reads the brief, and every decision is auditable,
+including the rejections.
+
+Two mechanisms do the anti-Frankenstein work, and they are the reason this is not
+just "retrieve eight sections and concatenate":
+
+- **The budget is spent in slot order** (`admit` / `planSelection`). The conflict
+  matrix is enforced *at selection*: if the hero already owns `scroll_hijack`, the
+  best-matching work grid that also hijacks scroll is rejected and the next-best
+  compatible one is taken instead. There is no patch for "two components both own
+  the scroll", so nothing conflicting is ever admitted. Top-down order is deliberate —
+  the page's identity is set above the fold, so early slots get first claim.
+- **One anchor, seven rewrites** (`normalizeTokens`). The first section pick's
+  `design_tokens` become the page's; every other component gets an explicit
+  `from → to` map for colors, font families, type sizes (snapped to the canonical
+  scale), and spacing. Nothing is averaged — an averaged type scale belongs to no
+  design. Where the anchor is silent, the first later pick that speaks fills the gap.
+
+What survives selection but still needs hand-merging (several rAF loops, several
+ScrollTrigger registrations, stacked fixed layers) becomes an explicit **After
+assembly** checklist rather than a silent bug.
+
+A slot with no admissible component is **not** force-filled. It is listed under
+*Write these fresh* with its top techniques and their `seen_in` components — which
+is exactly the job the technique index exists for.
+
+`--plan file.json` skips the LLM planner (also how the pass is smoke-tested offline).
+The composer is DB-free: it reads cards and techniques from disk, no Supabase needed.
+
 ## Not yet built (deliberate next passes)
 
-- **Composer + normalize pass** — plan skeleton → retrieve per slot → normalize
-  `design_tokens` → merge. This is where Frankenstein is actually prevented.
 - **Visual feedback loop** — Playwright screenshot → VLM critique → fix. This is what
   turns the pipeline into an agent; without it you have a demo.

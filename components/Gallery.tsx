@@ -6,7 +6,9 @@ import Filters, { type Filter, type SortKey } from './Filters';
 import Card from './Card';
 import ProjectModal from './ProjectModal';
 
-const TYPE_ORDER: Record<string, number> = { html: 1, react: 2, nextjs: 3 };
+import { BUCKET_LABEL, BUCKET_ORDER, runtimeBucket, runtimeBucketCounts, type RuntimeBucket } from '@/lib/runtime';
+
+const STAT_BUCKETS: RuntimeBucket[] = ['html', 'vite', 'react', 'nextjs', 'other'];
 
 export default function Gallery({ data }: { data: IndexData }) {
   const [filter, setFilter] = useState<Filter>('all');
@@ -22,21 +24,24 @@ export default function Gallery({ data }: { data: IndexData }) {
   const closeModal = useCallback(() => setCurrent(null), []);
   useEffect(() => { initSW(showToast); }, [showToast]);
 
-  const counts = data.counts || {};
+  const counts = useMemo(() => runtimeBucketCounts(data.projects), [data.projects]);
   const videoCount = data.projects.filter((p) => p.video || p.media?.videos?.length).length;
 
   const items = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = data.projects.filter((p) => {
-      if (filter !== 'all' && p.type !== filter) return false;
+      const bucket = runtimeBucket(p);
+      if (filter !== 'all' && bucket !== filter) return false;
       if (!q) return true;
-      const hay = [p.title, p.folder, p.date, p.author, p.msgId, p.type].filter(Boolean).join(' ').toLowerCase();
+      const hay = [p.title, p.folder, p.date, p.author, p.msgId, p.runtime, BUCKET_LABEL[bucket]]
+        .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
     list = [...list].sort((a, b) => {
       if (sort === 'title') return (a.title || '').localeCompare(b.title || '');
       if (sort === 'type-asc' || sort === 'type-desc') {
-        const cmp = (TYPE_ORDER[a.type] || 9) - (TYPE_ORDER[b.type] || 9) || (a.title || '').localeCompare(b.title || '');
+        const cmp = BUCKET_ORDER[runtimeBucket(a)] - BUCKET_ORDER[runtimeBucket(b)]
+          || (a.title || '').localeCompare(b.title || '');
         return sort === 'type-desc' ? -cmp : cmp;
       }
       const da = a.date || '', db = b.date || '';
@@ -52,12 +57,16 @@ export default function Gallery({ data }: { data: IndexData }) {
         sort={sort} setSort={setSort}
         search={search} setSearch={setSearch}
         meta={`${items.length} / ${data.projects.length} project`}
+        counts={counts}
       />
       <div className="stats">
         <div className="stat"><span className="stat-label">Project</span><span className="stat-val">{data.projects.length}</span></div>
-        <div className="stat"><span className="stat-label">HTML</span><span className="stat-val">{counts.html || 0}</span></div>
-        <div className="stat"><span className="stat-label">React</span><span className="stat-val">{counts.react || 0}</span></div>
-        <div className="stat"><span className="stat-label">Next.js</span><span className="stat-val">{counts.nextjs || 0}</span></div>
+        {STAT_BUCKETS.filter((bucket) => counts[bucket] > 0).map((bucket) => (
+          <div className="stat" key={bucket}>
+            <span className="stat-label">{BUCKET_LABEL[bucket]}</span>
+            <span className="stat-val">{counts[bucket]}</span>
+          </div>
+        ))}
         <div className="stat"><span className="stat-label">Video</span><span className="stat-val">{videoCount}</span></div>
       </div>
       <main className="grid" aria-live="polite">

@@ -14,6 +14,7 @@
   --accent-ring: rgb(93 42 26 / 35%);
   --on-accent: var(--color-paper-white);
   --html: #9a3f20;
+  --vite: #6b3fa0;
   --react: #176476;
   --nextjs: var(--color-ink-black);
   --radius: var(--radius-2xl);
@@ -198,7 +199,9 @@ button, select { touch-action: manipulation; }
 .badge { width: max-content; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: var(--radius-buttons); font-size: 11px; font-weight: var(--font-weight-medium); }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.html { background: #fff0e9; color: var(--html); }
+.badge.vite { background: #f1ebfa; color: var(--vite); }
 .badge.react { background: #e4f5f8; color: var(--react); }
+.badge.other { background: var(--surface-3); color: var(--muted); }
 .badge.nextjs { background: var(--surface-3); color: var(--nextjs); }
 
 .modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: var(--spacing-24); }

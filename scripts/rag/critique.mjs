@@ -89,7 +89,7 @@ async function askForCritique(chat, prompt, images, slotKeys) {
   const messages = visionPayload(resolveLlm().provider, prompt, images);
   let lastErr = 'unknown';
   for (let i = 0; i < 3; i++) {
-    const text = await chat(messages, 3000);
+    const text = await chat(messages, 16000); // reasoning models bill thinking against this
     let critique;
     try { critique = extractJson(text); } catch (e) {
       lastErr = e.message;

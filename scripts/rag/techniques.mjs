@@ -169,7 +169,7 @@ export async function extractTechniques(chat, card, knownNames = [], attempts = 
   const messages = [{ role: 'user', content: buildTechniquePrompt(card, knownNames) }];
   let lastErr = 'unknown';
   for (let i = 0; i < attempts; i++) {
-    const text = await chat(messages, 3000);
+    const text = await chat(messages, 16000); // reasoning models bill thinking against this
     let list;
     try {
       const obj = extractJson(text);

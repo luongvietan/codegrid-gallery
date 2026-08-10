@@ -31,6 +31,7 @@ export function resolveLlm(env = process.env) {
       baseUrl: (env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, ''),
       apiKey: env.LLM_API_KEY || env.OPENAI_API_KEY || '',
       model: env.LLM_MODEL || 'gpt-4o-mini',
+      reasoningEffort: env.LLM_REASONING_EFFORT || '',
     };
   }
   // DeepSeek is OpenAI-compatible, so it is the openai transport with its own
@@ -48,14 +49,38 @@ export function resolveLlm(env = process.env) {
       // still yields clean cards. Step 3's eval is what should decide if pro is
       // worth it: LLM_MODEL=deepseek-v4-pro.
       model: env.LLM_MODEL || 'deepseek-v4-flash',
+      reasoningEffort: env.LLM_REASONING_EFFORT || '',
     };
   }
   throw new Error(`Unknown LLM_PROVIDER "${provider}" (anthropic|openai|deepseek)`);
 }
 
-/** OpenAI-compatible chat body. Pure — unit-tested. */
-export function openaiPayload(messages, model, maxTokens) {
-  return { model, max_tokens: maxTokens, messages, stream: false };
+/** OpenAI-compatible chat body. Pure — unit-tested.
+ *  `reasoningEffort` is the cost lever on thinking models: DeepSeek v4 spends
+ *  thousands of tokens reasoning per annotation, which over 422 sources is real
+ *  money and real latency. Omitted unless asked for, so plain models are unaffected. */
+export function openaiPayload(messages, model, maxTokens, reasoningEffort = '') {
+  const body = { model, max_tokens: maxTokens, messages, stream: false };
+  if (reasoningEffort) body.reasoning_effort = reasoningEffort;
+  return body;
+}
+
+/**
+ * Read the text out of an OpenAI-compatible response, and FAIL LOUDLY when there
+ * is none. On a reasoning model (DeepSeek v4, o-series) `reasoning_content` is
+ * billed against the same max_tokens budget, so a budget that looks generous can
+ * be entirely consumed thinking — leaving content empty. That surfaced as the
+ * useless "no JSON object in response" three retries later; this names it.
+ */
+export function readChoice(json, maxTokens) {
+  const choice = json?.choices?.[0];
+  const text = choice?.message?.content ?? '';
+  if (text.trim()) return text;
+  const reasoning = json?.usage?.completion_tokens_details?.reasoning_tokens;
+  const why = choice?.finish_reason === 'length' || (reasoning && maxTokens && reasoning >= maxTokens * 0.8)
+    ? `the model spent its whole budget thinking (${reasoning} reasoning tokens of max_tokens=${maxTokens}) — raise max_tokens`
+    : `finish_reason=${choice?.finish_reason ?? 'unknown'}`;
+  throw new Error(`empty response from the model: ${why}`);
 }
 
 /** Build a `chat(messages, maxTokens) -> text` function for the resolved provider. */
@@ -75,10 +100,9 @@ export async function createChat(cfg) {
     const resp = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}) },
-      body: JSON.stringify(openaiPayload(messages, cfg.model, maxTokens)),
+      body: JSON.stringify(openaiPayload(messages, cfg.model, maxTokens, cfg.reasoningEffort)),
     });
     if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-    const j = await resp.json();
-    return j.choices?.[0]?.message?.content ?? '';
+    return readChoice(await resp.json(), maxTokens);
   };
 }

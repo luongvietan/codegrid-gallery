@@ -90,7 +90,9 @@ async function annotateOne(chat, record, source, frameworkHint) {
   let messages = [{ role: 'user', content: buildPrompt(record, source, frameworkHint) }];
   let lastErr = 'unknown';
   for (let attempt = 0; attempt < 3; attempt++) {
-    const text = await chat(messages, 3000);
+    // Generous on purpose: a card is a big JSON object, and on a reasoning model
+    // the thinking is billed against this same budget (see readChoice).
+    const text = await chat(messages, 16000);
     let card;
     try { card = extractJson(text); } catch (e) { lastErr = e.message; messages.push({ role: 'assistant', content: text }, { role: 'user', content: `That was not valid JSON (${e.message}). Return ONLY the JSON object.` }); continue; }
     const { ok, errors } = validateCard(card);

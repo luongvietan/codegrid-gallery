@@ -59,7 +59,7 @@ async function makePlan(chat, brief) {
   const messages = [{ role: 'user', content: planPrompt(brief) }];
   let lastErr = 'unknown';
   for (let i = 0; i < 3; i++) {
-    const text = await chat(messages, 2000);
+    const text = await chat(messages, 8000); // reasoning models bill thinking against this
     let plan;
     try { plan = extractJson(text); } catch (e) {
       lastErr = e.message;

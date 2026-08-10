@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveLlm, openaiPayload } from './llm.mjs';
+import { resolveLlm, openaiPayload, readChoice } from './llm.mjs';
 import { embedConfig } from './provider.mjs';
 
 test('resolveLlm defaults to anthropic claude-opus-4-8', () => {
@@ -31,6 +31,25 @@ test('resolveLlm: deepseek is the openai transport with its own endpoint and key
   assert.equal(cfg.model, 'deepseek-v4-flash');
   // LLM_MODEL still wins — the account decides which model id is current.
   assert.equal(resolveLlm({ LLM_PROVIDER: 'deepseek', LLM_MODEL: 'deepseek-v4-pro' }).model, 'deepseek-v4-pro');
+});
+
+test('readChoice returns the text when there is one', () => {
+  assert.equal(readChoice({ choices: [{ message: { content: '{"a":1}' }, finish_reason: 'stop' }] }, 3000), '{"a":1}');
+});
+
+test('readChoice blames the reasoning budget when a thinking model returns nothing', () => {
+  // The real DeepSeek v4 failure: reasoning_content is billed against max_tokens,
+  // so content comes back empty and the JSON parser reported a nonsense cause.
+  const body = {
+    choices: [{ message: { content: '', reasoning_content: 'thinking...' }, finish_reason: 'length' }],
+    usage: { completion_tokens_details: { reasoning_tokens: 2998 } },
+  };
+  assert.throws(() => readChoice(body, 3000), /budget thinking.*2998.*max_tokens=3000.*raise max_tokens/s);
+});
+
+test('readChoice reports finish_reason when the emptiness is not about thinking', () => {
+  assert.throws(() => readChoice({ choices: [{ message: { content: '' }, finish_reason: 'content_filter' }] }, 8000),
+    /finish_reason=content_filter/);
 });
 
 test('resolveLlm rejects an unknown provider', () => {

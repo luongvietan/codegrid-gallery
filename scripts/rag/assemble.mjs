@@ -74,7 +74,7 @@ async function main() {
   if (!fs.existsSync(planFile)) { console.error(`No plan.json in ${opts.dir} — run compose.mjs first.`); process.exit(1); }
   const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 
-  const sections = [];
+  const bySlot = new Map();
   const externalCss = [];
   const externalJs = [];
   const skipped = [];
@@ -118,18 +118,37 @@ async function main() {
       copied++;
     }
 
-    sections.push({
+    bySlot.set(pick.slot, {
       slot: pick.slot,
       html: rewriteAssetPaths(rewriteTokens(extractBodyInner(html), rewrite), assetPrefix),
       // Global components (a cursor, a smooth-scroll driver) keep their fixed
       // layers; a section's must be pinned to the section.
       css: scopeCss(rewriteAssetPaths(card.scope === 'global' ? rewriteTokens(local.css, rewrite) : containFixed(rewriteTokens(local.css, rewrite)), assetPrefix), scope),
       js: local.js,
+      origin: 'reused',
     });
     console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js, ${copied} image(s)`);
   }
 
-  for (const u of plan.unfilled || []) skipped.push({ slot: u.key, id: '(none)', why: `left for fresh code — ${u.reason}` });
+  // Sections written by generate.mjs, in the page's own design language rather
+  // than transplanted from a finished design.
+  const genDir = path.join(opts.dir, 'generated');
+  if (fs.existsSync(genDir)) {
+    for (const f of fs.readdirSync(genDir).filter((x) => x.endsWith('.json'))) {
+      const g = JSON.parse(fs.readFileSync(path.join(genDir, f), 'utf8'));
+      const scope = `[data-slot="${g.slot}"]`;
+      bySlot.set(g.slot, { slot: g.slot, html: g.html, css: scopeCss(g.css || '', scope), js: g.js || '', origin: 'written' });
+      console.log(`  ${g.slot.padEnd(12)} (written) · ${(g.css || '').length} B css, ${(g.js || '').length} B js`);
+    }
+  }
+
+  for (const u of plan.unfilled || []) {
+    if (!bySlot.has(u.key)) skipped.push({ slot: u.key, id: '(none)', why: `left for fresh code — ${u.reason}` });
+  }
+
+  // Page order is plan order, whichever way a slot was filled.
+  const order = (plan.plan?.slots || []).map((s) => s.key);
+  const sections = [...bySlot.values()].sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
 
   if (!sections.length) { console.error('Nothing assembled — every pick was skipped.'); process.exit(1); }
 
@@ -145,7 +164,7 @@ async function main() {
 
   const notes = [
     `# Assembly report — ${plan.plan?.title || ''}`, '',
-    `${sections.length} section(s) assembled into index.html.`, '',
+    `${sections.length} section(s) assembled into index.html: ${sections.filter((s) => s.origin === 'reused').map((s) => s.slot).join(', ') || 'none'} reused, ${sections.filter((s) => s.origin === 'written').map((s) => s.slot).join(', ') || 'none'} written.`, '',
     ...(skipped.length ? ['## Not in the page', '', ...skipped.map((s) => `- **${s.slot}** \`${s.id}\` — ${s.why}`), ''] : []),
     '## Read this before trusting the result', '',
     'Each source is a complete page, stacked here as a section with its CSS scoped',

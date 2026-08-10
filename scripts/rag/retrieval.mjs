@@ -49,6 +49,15 @@ export function applyFilters(card, f = {}) {
   // anchor whose tokens are white produce a page normalized to the wrong palette,
   // with every other section inverted to match it.
   if (f.colorMood && card.color_mood !== f.colorMood) return false;
+  // Touch has no cursor and no hover. A section whose ONLY motion is cursor- or
+  // hover-driven renders as an empty screen on a phone — which is exactly what a
+  // critique of the first assembled page found: the work slot was a cursor trail,
+  // and every mobile frame below the hero was blank.
+  if (f.touchSafe && card.scope === 'section') {
+    const motion = card.motion_character || [];
+    const pointerOnly = motion.length > 0 && motion.every((m) => m === 'cursor_follow' || m === 'hover_driven');
+    if (pointerOnly) return false;
+  }
   if (f.excludeSideEffects && f.excludeSideEffects.length && overlaps(card.side_effects, f.excludeSideEffects)) return false;
   if (f.excludeAnimLibs && f.excludeAnimLibs.length && overlaps(card.animation_libs, f.excludeAnimLibs)) return false;
   return true;

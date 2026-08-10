@@ -273,5 +273,17 @@ switches; the token-field difference between them is handled automatically.
 - **The corpus goes stale.** `data/index.json` grows with the daily sync — a
   critique run caught the gallery reporting 430 projects against a 422-card
   corpus. Re-run the ingest to catch up; it resumes and skips what it has.
-- **Nothing writes code yet.** `BUILD.md` is a set of decisions; assembling and
-  merging the components is still a job for the agent reading it.
+- **The fix loop does not reach zero blockers.** Five iterations of
+  assemble → critique → fix → rebuild on one composition went
+  reject/2 → revise/1 → reject/2 → revise/2 → revise/1. Real faults were fixed and
+  stayed fixed — broken assets went from 3 to 0 and are verified by counting
+  referenced urls against files on disk — but the last blocker is a trade-off,
+  not a bug: `overflow: hidden` stops one section's absolutely-positioned content
+  painting across the next, and clips content that meant to overflow.
+- **What stacking cannot fix is identity.** Once the structural faults are gone,
+  the critique's remaining findings are that the page shows three different
+  brands, three type hierarchies and three notions of what a header is — because
+  it is three finished designs stapled together. Scoping CSS makes a page
+  structurally coherent; it does not make it one design. Closing that gap means
+  generating markup from a technique rather than transplanting a component, which
+  is what the technique index exists for and what nothing yet uses it for.

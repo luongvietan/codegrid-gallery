@@ -165,6 +165,44 @@ export function containFixed(css) {
   return String(css ?? '').replace(/position\s*:\s*fixed/gi, 'position: absolute');
 }
 
+// Note `/` is NOT here: a component that wrote `/hero.jpg` meant "my folder",
+// because it owned the document root. As a section it owns nothing, so a
+// root-relative path is exactly as broken as a bare relative one.
+const ABSOLUTE_URL = /^(https?:|data:|blob:|#|\/\/)/i;
+
+/**
+ * Re-point a component's relative asset URLs at where its files now live.
+ *
+ * The component's markup says `src="img/hero.jpg"`, which resolved against its
+ * own folder. In the assembled page that path resolves against the output
+ * directory instead, so every image 404s — the first build with images kept
+ * still rendered a grid of broken-image icons. Real destinations (http, data,
+ * protocol-relative) are left alone, as are urls a script builds at runtime:
+ * `src="${imgSrc}"` cannot be resolved statically, and rewriting it would only
+ * corrupt the template.
+ */
+export function rewriteAssetPaths(text, prefix) {
+  const p = String(prefix).replace(/\/+$/, '');
+  const fix = (url) => {
+    const u = url.trim();
+    if (ABSOLUTE_URL.test(u)) return url;
+    if (u.includes('${') || u.includes('{{')) return url;   // built by JS at runtime
+    return `${p}/${u.replace(/^\.?\//, '')}`;
+  };
+  return String(text ?? '')
+    // html: src="...", href on images, poster="...", and every candidate in srcset
+    .replace(/\b(src|poster)\s*=\s*(["'])([^"']+)\2/gi, (m, attr, q, url) => `${attr}=${q}${fix(url)}${q}`)
+    .replace(/\bsrcset\s*=\s*(["'])([^"']+)\1/gi, (m, q, val) => {
+      const out = val.split(',').map((part) => {
+        const [url, ...rest] = part.trim().split(/\s+/);
+        return [fix(url), ...rest].join(' ');
+      }).join(', ');
+      return `srcset=${q}${out}${q}`;
+    })
+    // css: url(...) with or without quotes
+    .replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (m, q, url) => `url(${q}${fix(url)}${q})`);
+}
+
 /** Each component's script gets its own scope: two pages both declaring `const
  *  container` at top level would throw on the second one. */
 export function wrapJs(js, slot) {
@@ -185,7 +223,7 @@ export function buildPage({ title = 'Composed page', tokens = {}, externals = { 
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${title}</title>`,
     ...externals.css.map((h) => `<link rel="stylesheet" href="${h}">`),
-    `<style>\n:root { ${rootVars} }\nhtml, body { margin: 0; padding: 0; background: ${colors.bg || '#fff'}; color: ${colors.fg || '#000'}; }\n[data-slot] { position: relative; }\n${sections.map((s) => s.css).filter(Boolean).join('\n')}\n</style>`,
+    `<style>\n:root { ${rootVars} }\nhtml, body { margin: 0; padding: 0; background: ${colors.bg || '#fff'}; color: ${colors.fg || '#000'}; }\n/* position: the anchor that containFixed's absolutes resolve against.\n   overflow: without it those absolutes contribute no height, so a section's\n   content spills over the sections below it — a work list painted across the\n   contact and menu screens was how that showed up. */\n[data-slot] { position: relative; overflow: hidden; }\n${sections.map((s) => s.css).filter(Boolean).join('\n')}\n</style>`,
   ].join('\n  ');
 
   const body = sections.map((s) => `<section data-slot="${s.slot}">\n${s.html}\n</section>`).join('\n\n');

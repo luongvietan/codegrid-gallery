@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, buildPage, containFixed,
+  scopeCss, rewriteTokens, buildPage, containFixed, rewriteAssetPaths,
 } from './assembly.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -35,6 +35,7 @@ function parseArgs(argv) {
 }
 
 const readIfExists = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '');
+const outDirFor = (opts) => opts.out || path.join(opts.dir, 'site');
 
 /** Inline what the page links locally; a CDN url is hoisted, a relative one is a file. */
 function inlineLocalAssets(html, projectDir, entryRel) {
@@ -99,22 +100,40 @@ async function main() {
     const rewrite = (plan.rewrites || {})[pick.id] || {};
     const scope = `[data-slot="${pick.slot}"]`;
 
+    // Copy this component's images and re-point its urls at the copies. Paths
+    // are kept relative to the component's entry file, which is what its markup
+    // was written against.
+    const assetPrefix = `assets/${pick.slot}`;
+    const entryDir = path.dirname(entry);
+    let copied = 0;
+    for (const img of record.images || []) {
+      let rel = entryDir && img.path.startsWith(`${entryDir}/`) ? img.path.slice(entryDir.length + 1) : img.path;
+      // Vite (and Next, and CRA) serve `public/` from the document root, which is
+      // why these pages reference `/hero.jpg` for a file stored at
+      // `public/hero.jpg`. Dropping the segment is what makes those urls resolve.
+      rel = rel.replace(/^public\//, '');
+      const dest = path.join(outDirFor(opts, plan), assetPrefix, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.copyFileSync(path.join(projectDir, img.path), dest);
+      copied++;
+    }
+
     sections.push({
       slot: pick.slot,
-      html: rewriteTokens(extractBodyInner(html), rewrite),
+      html: rewriteAssetPaths(rewriteTokens(extractBodyInner(html), rewrite), assetPrefix),
       // Global components (a cursor, a smooth-scroll driver) keep their fixed
       // layers; a section's must be pinned to the section.
-      css: scopeCss(card.scope === 'global' ? rewriteTokens(local.css, rewrite) : containFixed(rewriteTokens(local.css, rewrite)), scope),
+      css: scopeCss(rewriteAssetPaths(card.scope === 'global' ? rewriteTokens(local.css, rewrite) : containFixed(rewriteTokens(local.css, rewrite)), assetPrefix), scope),
       js: local.js,
     });
-    console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js`);
+    console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js, ${copied} image(s)`);
   }
 
   for (const u of plan.unfilled || []) skipped.push({ slot: u.key, id: '(none)', why: `left for fresh code — ${u.reason}` });
 
   if (!sections.length) { console.error('Nothing assembled — every pick was skipped.'); process.exit(1); }
 
-  const outDir = opts.out || path.join(opts.dir, 'site');
+  const outDir = outDirFor(opts, plan);
   fs.mkdirSync(outDir, { recursive: true });
   const page = buildPage({
     title: plan.plan?.title || 'Composed page',

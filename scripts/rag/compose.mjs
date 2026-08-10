@@ -37,6 +37,7 @@ function parseArgs(argv) {
     else if (a === '--exclude-lib') o.filters.excludeAnimLibs = [...(o.filters.excludeAnimLibs || []), ...argv[++i].split(',')];
     else if (a === '--aesthetic') o.filters.aesthetic = argv[++i].split(',');
     else if (a === '--mood') o.filters.colorMood = argv[++i];
+    else if (a === '--touch-safe') o.filters.touchSafe = true;
     else o.terms.push(a);
   }
   return o;

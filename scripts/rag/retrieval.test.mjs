@@ -99,3 +99,18 @@ test('applyFilters can hold the page to one colour mood', () => {
   assert.equal(applyFilters(light, { colorMood: 'dark' }), false);
   assert.equal(applyFilters(light, {}), true);
 });
+
+test('applyFilters can refuse sections that only work with a pointer', () => {
+  // Found by critiquing a real assembled page: the work slot was a cursor-trail
+  // component, so every mobile frame below the hero was an empty black screen.
+  const trail = card('t', { motion_character: ['cursor_follow'] });
+  const hoverOnly = card('h', { motion_character: ['hover_driven'] });
+  const scroll = card('s', { motion_character: ['scroll_driven', 'hover_driven'] });
+  const cursorGlobal = card('c', { scope: 'global', comp_type: 'cursor', motion_character: ['cursor_follow'] });
+
+  assert.equal(applyFilters(trail, { touchSafe: true }), false);
+  assert.equal(applyFilters(hoverOnly, { touchSafe: true }), false);
+  assert.equal(applyFilters(scroll, { touchSafe: true }), true);   // hover is an enhancement here
+  assert.equal(applyFilters(cursorGlobal, { touchSafe: true }), true); // a cursor is allowed to be a cursor
+  assert.equal(applyFilters(trail, {}), true);
+});

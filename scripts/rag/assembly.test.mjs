@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed,
+  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed, rewriteAssetPaths,
 } from './assembly.mjs';
 
 // ---------- pulling a page apart ----------
@@ -119,6 +119,27 @@ test('containFixed pins a section fixed layer to its section', () => {
   assert.equal(containFixed('.nav { position: fixed; top: 0; }'), '.nav { position: absolute; top: 0; }');
   assert.equal(containFixed('.a{position:FIXED}'), '.a{position: absolute}');
   assert.equal(containFixed('.b { position: sticky; }'), '.b { position: sticky; }');
+});
+
+test('rewriteAssetPaths re-points relative urls and leaves real ones alone', () => {
+  // The component says src="img/hero.jpg" relative to ITS folder; in the
+  // assembled page that resolves against the output dir and 404s.
+  assert.equal(rewriteAssetPaths('<img src="img/hero.jpg">', 'assets/work'),
+    '<img src="assets/work/img/hero.jpg">');
+  assert.equal(rewriteAssetPaths('<img src="./a.png">', 'assets/work'), '<img src="assets/work/a.png">');
+  assert.equal(rewriteAssetPaths('background: url(bg.jpg);', 'assets/work'), 'background: url(assets/work/bg.jpg);');
+  assert.equal(rewriteAssetPaths("background: url('bg.jpg');", 'assets/work'), "background: url('assets/work/bg.jpg');");
+
+  // A component that wrote `/hero.jpg` meant its own folder — it owned the
+  // document root. As a section it owns nothing, so this needs rewriting too.
+  assert.equal(rewriteAssetPaths('<img src="/hero.jpg">', 'assets/work'), '<img src="assets/work/hero.jpg">');
+
+  for (const untouched of ['<img src="https://cdn/a.png">', '<img src="//cdn/a.png">',
+    '<img src="data:image/png;base64,AA">', '<img src="${imgSrc}">']) {
+    assert.equal(rewriteAssetPaths(untouched, 'assets/work'), untouched);
+  }
+  assert.equal(rewriteAssetPaths('<img srcset="a.png 1x, b.png 2x">', 'assets/w'),
+    '<img srcset="assets/w/a.png 1x, assets/w/b.png 2x">');
 });
 
 // ---------- assembly ----------

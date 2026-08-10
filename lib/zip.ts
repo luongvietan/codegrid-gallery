@@ -3,7 +3,15 @@ import { proxiedAssetUrl } from './assets.ts';
 interface ZipEntry {
   dir: boolean;
   _data?: { uncompressedSize?: number };
-  async(type: 'arraybuffer'): Promise<ArrayBuffer>;
+  internalStream(type: 'uint8array'): ZipStream;
+}
+
+interface ZipStream {
+  on(event: 'data', callback: (chunk: Uint8Array) => void): ZipStream;
+  on(event: 'end', callback: () => void): ZipStream;
+  on(event: 'error', callback: (error: Error) => void): ZipStream;
+  pause(): ZipStream;
+  resume(): ZipStream;
 }
 
 interface ZipArchive {
@@ -34,6 +42,53 @@ function includedSourcePath(relativePath: string): boolean {
   return !relativePath.startsWith('__MACOSX/')
     && !relativePath.endsWith('.DS_Store')
     && !/(^|\/)(\.git|node_modules|\.next)\//.test(relativePath);
+}
+
+function extractBounded(entry: ZipEntry, previouslyExpandedBytes: number): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Uint8Array[] = [];
+    let fileBytes = 0;
+    let settled = false;
+    const stream = entry.internalStream('uint8array');
+
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      stream.pause();
+      reject(error);
+    };
+
+    stream
+      .on('data', (chunk) => {
+        if (settled) return;
+        fileBytes += chunk.byteLength;
+        if (fileBytes > MAX_FILE_BYTES || previouslyExpandedBytes + fileBytes > MAX_EXPANDED_BYTES) {
+          rejectOnce(new Error(ZIP_SAFETY_ERROR));
+          return;
+        }
+        chunks.push(chunk);
+      })
+      .on('error', rejectOnce)
+      .on('end', () => {
+        if (settled) return;
+        settled = true;
+        if (chunks.length === 1 && chunks[0].byteOffset === 0
+          && chunks[0].byteLength === chunks[0].buffer.byteLength
+          && chunks[0].buffer instanceof ArrayBuffer) {
+          resolve(chunks[0].buffer);
+          return;
+        }
+
+        const contents = new Uint8Array(fileBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+          contents.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+        resolve(contents.buffer);
+      })
+      .resume();
+  });
 }
 
 async function readCompressedZip(response: Response): Promise<ArrayBuffer> {
@@ -100,10 +155,8 @@ export async function fetchAndExtractZip(folder: string, zipName: string): Promi
   const files = new Map<string, ArrayBuffer>();
   let expandedBytes = 0;
   for (const { relativePath, entry } of entries) {
-    const contents = await entry.async('arraybuffer');
-    if (contents.byteLength > MAX_FILE_BYTES) return safetyError();
+    const contents = await extractBounded(entry, expandedBytes);
     expandedBytes += contents.byteLength;
-    if (expandedBytes > MAX_EXPANDED_BYTES) return safetyError();
     names.push(relativePath);
     files.set(relativePath, contents);
   }

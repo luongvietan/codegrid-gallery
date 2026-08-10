@@ -33,7 +33,24 @@ export function resolveLlm(env = process.env) {
       model: env.LLM_MODEL || 'gpt-4o-mini',
     };
   }
-  throw new Error(`Unknown LLM_PROVIDER "${provider}" (anthropic|openai)`);
+  // DeepSeek is OpenAI-compatible, so it is the openai transport with its own
+  // endpoint + key var. `preset` records where the defaults came from; `provider`
+  // stays "openai" because that is what createChat and visionPayload switch on.
+  if (provider === 'deepseek') {
+    return {
+      provider: 'openai',
+      preset: 'deepseek',
+      baseUrl: (env.LLM_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/+$/, ''),
+      apiKey: env.DEEPSEEK_API_KEY || env.LLM_API_KEY || '',
+      // Verified against GET /models: the account exposes deepseek-v4-flash and
+      // deepseek-v4-pro. Flash is the batch default — 422 annotations is a lot of
+      // calls, and validateCard's retry loop exists precisely so a cheaper model
+      // still yields clean cards. Step 3's eval is what should decide if pro is
+      // worth it: LLM_MODEL=deepseek-v4-pro.
+      model: env.LLM_MODEL || 'deepseek-v4-flash',
+    };
+  }
+  throw new Error(`Unknown LLM_PROVIDER "${provider}" (anthropic|openai|deepseek)`);
 }
 
 /** OpenAI-compatible chat body. Pure — unit-tested. */

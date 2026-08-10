@@ -156,6 +156,11 @@ re-annotate, not a migration.
 - **LLM provider (annotate).** Default Anthropic `claude-opus-4-8`. For a free run set
   `LLM_PROVIDER=openai` + `LLM_BASE_URL`/`LLM_MODEL` at any OpenAI-compatible endpoint
   (Ollama local, OpenRouter free, DashScope). See "Run it 100% free / local" above.
+  `LLM_PROVIDER=deepseek` is a preset for the same transport: it reads
+  `DEEPSEEK_API_KEY` and defaults to `deepseek-v4-flash` (the cheap end — 422
+  annotations is a lot of calls, and the validate-and-retry loop is what keeps a
+  cheaper model's cards clean). `LLM_MODEL=deepseek-v4-pro` for the stronger one;
+  step 3's eval is what should decide whether it earns the difference.
 - **Where to run.** Annotate/embed need the corpus + API keys, so they run on your
   machine or CI — not inside an egress-restricted sandbox (where R2 is blocked).
 - **Which Supabase project.** The migration is a file on purpose — run it against a

@@ -22,6 +22,17 @@ test('resolveLlm openai falls back to OPENAI_API_KEY and gpt-4o-mini', () => {
   assert.equal(cfg.model, 'gpt-4o-mini');
 });
 
+test('resolveLlm: deepseek is the openai transport with its own endpoint and key', () => {
+  const cfg = resolveLlm({ LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'sk-ds' });
+  assert.equal(cfg.provider, 'openai');   // what createChat/visionPayload switch on
+  assert.equal(cfg.preset, 'deepseek');
+  assert.equal(cfg.baseUrl, 'https://api.deepseek.com/v1');
+  assert.equal(cfg.apiKey, 'sk-ds');
+  assert.equal(cfg.model, 'deepseek-v4-flash');
+  // LLM_MODEL still wins — the account decides which model id is current.
+  assert.equal(resolveLlm({ LLM_PROVIDER: 'deepseek', LLM_MODEL: 'deepseek-v4-pro' }).model, 'deepseek-v4-pro');
+});
+
 test('resolveLlm rejects an unknown provider', () => {
   assert.throws(() => resolveLlm({ LLM_PROVIDER: 'gemini' }), /Unknown LLM_PROVIDER/);
 });

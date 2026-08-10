@@ -69,7 +69,11 @@ function manifestEntry(entries: Array<{ name: string; segments: string[]; conten
     .sort((left, right) => left.segments.length - right.segments.length || left.name.localeCompare(right.name))[0];
 }
 
-function packageManifest(contents: ArrayBuffer): { scripts: Record<string, string>; packageManager: string | null } {
+function packageManifest(contents: ArrayBuffer): {
+  scripts: Record<string, string>;
+  packageManager: string | null;
+  hasNextDependency: boolean;
+} {
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(contents));
@@ -85,9 +89,18 @@ function packageManifest(contents: ArrayBuffer): { scripts: Record<string, strin
     typeof entry[1] === 'string' && entry[1].trim().length > 0
   ));
   const packageManager = (parsed as { packageManager?: unknown }).packageManager;
+  const dependencies = (parsed as { dependencies?: unknown }).dependencies;
+  const devDependencies = (parsed as { devDependencies?: unknown }).devDependencies;
+  const hasNextDependency = [dependencies, devDependencies].some((group) => (
+    !!group
+    && typeof group === 'object'
+    && !Array.isArray(group)
+    && typeof (group as Record<string, unknown>).next === 'string'
+  ));
   return {
     scripts: Object.fromEntries(validScripts),
     packageManager: typeof packageManager === 'string' ? packageManager : null,
+    hasNextDependency,
   };
 }
 
@@ -130,9 +143,11 @@ function commandsFor(
   const scriptName = pkg.scripts.dev ? 'dev' : pkg.scripts.start ? 'start' : null;
   if (!scriptName) return invalidProject();
 
-  const serverArgs = /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
+  const isNextDev = pkg.hasNextDependency && scriptName === 'dev';
+  const serverArgs = isNextDev || /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
     ? ['--hostname', '0.0.0.0']
     : [];
+  if (isNextDev) serverArgs.push('--webpack');
   if (usesPnpm) {
     return {
       installCommand: hasPnpmLock

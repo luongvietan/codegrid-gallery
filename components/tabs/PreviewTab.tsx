@@ -48,8 +48,15 @@ export default function PreviewTab({ p, zip, onToast }: {
     <section className="pane pane-preview active">
       <div className="preview-toolbar">
         <span className="status">{status}</span>
-        <button className="ghost" onClick={() => entry && window.open(`/__preview__/${encodePath(entry)}`, '_blank')}>↗ Tab mới</button>
-        <button className="ghost" onClick={() => { if (entry && iframe.current) iframe.current.src = `/__preview__/${encodePath(entry)}`; }}>⟳</button>
+        <button type="button" className="ghost" onClick={() => entry && window.open(`/__preview__/${encodePath(entry)}`, '_blank')}>↗ Tab mới</button>
+        <button
+          type="button"
+          className="ghost icon"
+          aria-label="Tải lại preview"
+          onClick={() => { if (entry && iframe.current) iframe.current.src = `/__preview__/${encodePath(entry)}`; }}
+        >
+          ⟳
+        </button>
       </div>
       <div className="iframe-wrap">
         <iframe id="preview" ref={iframe} title="Preview" sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups" />

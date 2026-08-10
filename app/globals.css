@@ -507,43 +507,49 @@ button, select { touch-action: manipulation; }
 }
 .modal-tabs {
   display: flex;
-  gap: 2px;
+  flex-wrap: nowrap;
+  gap: var(--spacing-4);
   padding: var(--spacing-4);
-  border-radius: var(--radius-lg);
+  border-radius: 9999px;
   background: var(--surface-2);
   border: 1px solid var(--line);
 }
 .tab {
   border: 0;
   min-height: 36px;
-  padding: 8px 16px;
-  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  border-radius: 9999px;
   background: transparent;
-  color: var(--muted);
+  color: var(--txt-2);
   cursor: pointer;
+  font: inherit;
   font-size: var(--text-body-sm);
   font-weight: var(--font-weight-medium);
   transition: color 160ms var(--ease), background 160ms var(--ease);
 }
-.tab:hover { color: var(--txt); }
+.tab:hover { color: var(--txt); background: color-mix(in srgb, var(--surface-3) 70%, transparent); }
 .tab.active {
-  background: var(--surface-1);
-  color: var(--txt);
-  border: 1px solid var(--line);
+  background: var(--accent);
+  color: var(--on-accent);
 }
 .close {
   width: 40px;
   height: 40px;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--line);
+  border-radius: 9999px;
   background: var(--surface-2);
   color: var(--txt-2);
   cursor: pointer;
-  transition: background 160ms var(--ease), color 160ms var(--ease);
+  font: inherit;
+  transition: background 160ms var(--ease), color 160ms var(--ease), border-color 160ms var(--ease);
 }
-.close:hover { background: var(--accent-soft); color: var(--accent-hover); }
+.close:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
 .modal-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .pane { position: absolute; inset: 0; display: none; }
 .pane.active { display: flex; }
@@ -576,15 +582,28 @@ button, select { touch-action: manipulation; }
 .ghost {
   border: 1px solid var(--line);
   min-height: 36px;
-  padding: 7px 12px;
-  border-radius: var(--radius-md);
+  padding: 7px 14px;
+  border-radius: 9999px;
   background: var(--surface-1);
   color: var(--txt-2);
   cursor: pointer;
+  font: inherit;
   font-size: var(--text-body-sm);
-  transition: border-color 160ms var(--ease), color 160ms var(--ease);
+  font-weight: var(--font-weight-medium);
+  transition: border-color 160ms var(--ease), color 160ms var(--ease), background 160ms var(--ease);
 }
-.ghost:hover { border-color: var(--accent); color: var(--accent-hover); }
+.ghost:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+.ghost.icon {
+  width: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+}
 .iframe-wrap { position: relative; flex: 1; background: var(--color-white); }
 #preview { width: 100%; height: 100%; display: block; border: 0; background: var(--color-white); }
 

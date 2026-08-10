@@ -15,13 +15,15 @@ export default function StaticPreviewTab({ preview }: { preview: PreviewManifest
       <div className="preview-toolbar">
         <span className="status">{preview.entry}</span>
         <button
+          type="button"
           className="ghost"
           onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
         >
           ↗ Tab mới
         </button>
         <button
-          className="ghost"
+          type="button"
+          className="ghost icon"
           aria-label="Tải lại preview"
           onClick={() => {
             if (iframe.current) iframe.current.src = url;

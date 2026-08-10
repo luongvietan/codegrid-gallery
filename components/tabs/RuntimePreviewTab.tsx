@@ -65,13 +65,15 @@ export default function RuntimePreviewTab({
         {readyUrl && (
           <>
             <button
+              type="button"
               className="ghost"
               onClick={() => window.open(readyUrl, '_blank', 'noopener,noreferrer')}
             >
               ↗ Tab mới
             </button>
             <button
-              className="ghost"
+              type="button"
+              className="ghost icon"
               aria-label="Tải lại preview"
               onClick={() => {
                 if (iframe.current) iframe.current.src = readyUrl;

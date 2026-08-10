@@ -1,0 +1,50 @@
+{
+  "id": "src_087",
+  "source_path": "2023-05-12_KINETIC EDITORIAL HERO",
+  "origin_site": null,
+  "loc": 214,
+  "schema_version": 1,
+  "annotator_model": "reference-handwritten",
+  "scope": "section",
+  "comp_type": "hero",
+  "framework": "vanilla",
+  "animation_libs": ["gsap", "scrolltrigger", "splittext", "lenis"],
+  "css_approach": "vanilla_css",
+  "needs_webgl": false,
+  "asset_types": ["font"],
+  "side_effects": ["scrolltrigger_register", "resize_listener"],
+  "aesthetic": ["editorial", "brutalist"],
+  "motion_character": ["scroll_driven"],
+  "density": "sparse",
+  "color_mood": "dark",
+  "description": "A hero that fills the whole viewport on a near-black background. The headline is set in a condensed sans-serif at a very large size, roughly two-thirds of the screen height, and bleeds past both the left and right edges so the letters are clipped at each end. It sits in three left-aligned lines; a small caption sits in the lower-right corner. On load, each character slides up from below with a staggered delay, revealed through a mask. As the page scrolls, the whole headline drifts upward slower than the scroll for a depth effect and fades out. Mechanism: characters are split and revealed with a staggered timeline, then a scrubbed scroll trigger drives the parallax and fade.",
+  "retrieval_probes": [
+    "dark editorial hero, text reveals letter by letter on load",
+    "oversized headline hero that bleeds off the edges",
+    "full-bleed kinetic typography hero with scroll parallax",
+    "minimal text-only hero, no images, dark background"
+  ],
+  "dom_root": ".hero",
+  "entry_point": "initHero()",
+  "design_tokens": {
+    "fonts": [{ "family": "PP Neue Montreal", "role": "display", "weights": [500] }],
+    "type_scale_px": [14, 18, 160],
+    "colors": { "bg": "#0A0A0A", "fg": "#EFEFEF", "accent": null },
+    "spacing_unit_px": 8,
+    "radius_px": 0,
+    "max_width_px": null,
+    "grid_columns": null
+  },
+  "content_slots": {
+    "text": [
+      { "key": "headline", "max_chars": 36, "note": "3 lines, each line <= 12 chars; more than 4 words breaks the layout" },
+      { "key": "caption", "max_chars": 60, "note": null }
+    ],
+    "media": [],
+    "repeatable": null
+  },
+  "responsive": "fluid",
+  "coupling": "needs_scroll_container",
+  "notes": null,
+  "code": "<!-- raw source lives here as the payload; truncated in this reference exemplar -->"
+}

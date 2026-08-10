@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+// scripts/rag/annotate.mjs — turn each ingested project into a Card (annotation layer).
+//
+// Reads corpus/<id>/ source, asks Claude to describe the OUTPUT (not the code) and
+// classify it against the controlled vocabulary, validates every enum client-side
+// (validateCard) with a retry loop, and writes corpus/cards/<id>.json. Idempotent.
+//
+//   npm i @anthropic-ai/sdk
+//   ANTHROPIC_API_KEY=... node scripts/rag/annotate.mjs --limit 20
+//
+// Needs the corpus (run scripts/ingest.mjs first) and an API key — so it runs
+// where R2 is reachable, not inside an egress-restricted sandbox.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isTextFile } from '../ingest-lib.mjs';
+import { ENUMS, LLM_FIELDS, validateCard } from './schema.mjs';
+import { resolveLlm, createChat, extractJson } from './llm.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const MAX_SOURCE = 45000;
+const FRAMEWORK_HINT = { html: 'vanilla', react: 'react', nextjs: 'next' };
+
+function parseArgs(argv) {
+  const o = { corpus: path.join(ROOT, 'corpus'), limit: 0, concurrency: 3, force: false };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--force') o.force = true;
+    else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
+    else if (a === '--limit') o.limit = Math.max(0, +argv[++i] || 0);
+    else if (a === '--concurrency') o.concurrency = Math.max(1, +argv[++i] || 3);
+    else { console.error(`Unknown argument: ${a}`); process.exit(2); }
+  }
+  return o;
+}
+
+function gatherSource(dir, record) {
+  const files = (record.files || []).map((f) => f.path);
+  const entry = record.entryHtml && files.includes(record.entryHtml) ? record.entryHtml : null;
+  const ordered = [entry, ...files.filter((p) => p !== entry)].filter(Boolean);
+  let used = 0, loc = 0;
+  const parts = [];
+  for (const rel of ordered) {
+    if (!isTextFile(rel)) continue;
+    let text;
+    try { text = fs.readFileSync(path.join(dir, rel), 'utf8'); } catch { continue; }
+    loc += text.split('\n').length;
+    if (used >= MAX_SOURCE) continue;
+    const slice = text.slice(0, Math.max(0, MAX_SOURCE - used));
+    parts.push(`\n===== ${rel} =====\n${slice}`);
+    used += slice.length;
+  }
+  return { source: parts.join('\n'), loc };
+}
+
+function enumList(key) { return ENUMS[key].join(', '); }
+
+function buildPrompt(record, source, frameworkHint) {
+  return `You are indexing a front-end component rebuilt from an awwwards-style site so an AI can later find and reassemble it. Read ALL the code, then return ONLY one JSON object (no markdown fence, no prose) with EXACTLY these keys: ${LLM_FIELDS.join(', ')}.
+
+Framework hint (from the archive): ${frameworkHint}. Title: ${record.title ?? record.id}. Entry: ${record.entryHtml ?? '(none)'}.
+
+RULES:
+1. Every enum field MUST use a value from its list below — never invent one. If nothing fits, pick the closest and explain in "notes".
+   scope: ${enumList('scope')}
+   comp_type: ${enumList('comp_type')}   (cursor/smooth_scroll/preloader/scroll_progress/audio_toggle are scope=global; menu/modal/lightbox/page_transition are scope=overlay; the rest are scope=section)
+   framework: ${enumList('framework')}
+   animation_libs (array, [] if none): ${enumList('anim_lib')}
+   css_approach: ${enumList('css_approach')}
+   asset_types (array): ${enumList('asset_type')}
+   side_effects (array): ${enumList('side_effect')}
+   aesthetic (array, 1-3): ${enumList('aesthetic')}
+   motion_character (array): ${enumList('motion_tag')}
+   density: ${enumList('density')}
+   color_mood: ${enumList('color_mood')}
+   responsive: ${enumList('responsive')}
+   coupling: ${enumList('coupling')}
+2. "description" (80-140 words), three seamless parts: (a) WHAT YOU SEE — layout, proportions, relative type size, color, density, for someone who can't see the screen; OPEN with whatever most distinguishes this page from others of the same type, not with a generic opener like "a full-viewport landing page"; (b) WHAT HAPPENS — what moves, triggered by what, how it feels; (c) MECHANISM — one sentence on how it's built. FORBIDDEN: class/variable/file/brand names; marketing words ("beautiful", "modern", "stunning").
+3. "retrieval_probes": 3-5 short phrases a DESIGNER might type to find this (brief vocabulary, NOT code vocabulary). Good: "dark editorial hero, text reveals on scroll". Bad: "component using SplitText and ScrollTrigger".
+   3b. PROBES MUST DISCRIMINATE. At least three must name something that separates THIS page from a generic example of the same type: a specific colour or colour pair, an unusual proportion or placement, a distinctive motion, a structural oddity. A probe that would match equally well any dark hero with animated text is wasted — delete it and write a sharper one. Before you finish, reread your probes and ask: could these five phrases describe a DIFFERENT page in this collection? If yes, rewrite them.
+4. "side_effects": read carefully — does it touch document.body.style? run its own requestAnimationFrame? add listeners to window? Missing this field is the worst error.
+5. "design_tokens": {fonts:[{family,role,weights:[]}], type_scale_px:[], colors:{bg,fg,accent}, spacing_unit_px, radius_px, max_width_px, grid_columns} — fill what the code shows, null otherwise.
+6. "content_slots": {text:[{key,max_chars,note}], media:[{key,type,aspect,required}], repeatable:{key,min,max}|null} — max_chars estimated from the real layout (if the headline is designed for 3 words, say so).
+7. Unsure -> null. Never fabricate. "needs_webgl" is a boolean.
+
+SOURCE:
+${source}`;
+}
+
+async function annotateOne(chat, record, source, frameworkHint) {
+  let messages = [{ role: 'user', content: buildPrompt(record, source, frameworkHint) }];
+  let lastErr = 'unknown';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Generous on purpose: a card is a big JSON object, and on a reasoning model
+    // the thinking is billed against this same budget (see readChoice).
+    const text = await chat(messages, 16000);
+    let card;
+    try { card = extractJson(text); } catch (e) { lastErr = e.message; messages.push({ role: 'assistant', content: text }, { role: 'user', content: `That was not valid JSON (${e.message}). Return ONLY the JSON object.` }); continue; }
+    const { ok, errors } = validateCard(card);
+    if (ok) return card;
+    lastErr = errors.join('; ');
+    messages.push({ role: 'assistant', content: text }, { role: 'user', content: `The JSON failed validation. Fix ONLY these and return the full corrected JSON:\n- ${errors.join('\n- ')}` });
+  }
+  throw new Error(`validation failed after retries: ${lastErr}`);
+}
+
+async function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const manifestPath = path.join(opts.corpus, 'manifest.json');
+  if (!fs.existsSync(manifestPath)) { console.error(`No corpus manifest. Run: node scripts/ingest.mjs`); process.exit(1); }
+  const llm = resolveLlm();
+  if (llm.provider === 'anthropic' && !process.env.ANTHROPIC_API_KEY) {
+    console.error('Set ANTHROPIC_API_KEY, or use a free/local endpoint:\n  LLM_PROVIDER=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=qwen3-coder node scripts/rag/annotate.mjs');
+    process.exit(1);
+  }
+  let chat;
+  try { chat = await createChat(llm); } catch (e) { console.error(e.message); process.exit(1); }
+  console.log(`Annotating with ${llm.provider}:${llm.model}${llm.baseUrl ? ` @ ${llm.baseUrl}` : ''}`);
+
+  const cardsDir = path.join(opts.corpus, 'cards');
+  fs.mkdirSync(cardsDir, { recursive: true });
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  let projects = manifest.projects.filter((p) => p.status === 'ok');
+  if (opts.limit) projects = projects.slice(0, opts.limit);
+
+  let done = 0;
+  const queue = [...projects];
+  async function worker() {
+    while (queue.length) {
+      const p = queue.shift();
+      const out = path.join(cardsDir, `${p.id}.json`);
+      if (!opts.force && fs.existsSync(out)) { console.log(`[${++done}/${projects.length}] ${p.id} · cached`); continue; }
+      const dir = path.join(opts.corpus, p.id);
+      const record = JSON.parse(fs.readFileSync(path.join(dir, '.ingest.json'), 'utf8'));
+      const { source, loc } = gatherSource(dir, record);
+      if (!source.trim()) { console.log(`[${++done}/${projects.length}] ${p.id} · no source`); continue; }
+      try {
+        const card = await annotateOne(chat, record, source, FRAMEWORK_HINT[p.type] || 'vanilla');
+        const full = { id: p.id, source_path: record.folder, origin_site: null, loc,
+          schema_version: 1, annotator_model: llm.model, ...card, code: source.slice(0, 60000) };
+        fs.writeFileSync(out, JSON.stringify(full, null, 2));
+        console.log(`[${++done}/${projects.length}] ${p.id} · ${card.scope}/${card.comp_type} ✓`);
+      } catch (e) {
+        console.error(`[${++done}/${projects.length}] ${p.id} · FAILED: ${e.message}`);
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(opts.concurrency, projects.length) }, worker));
+  console.log(`\nCards in ${path.relative(ROOT, cardsDir)}/. Next: node scripts/rag/embed.mjs`);
+}
+
+main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });

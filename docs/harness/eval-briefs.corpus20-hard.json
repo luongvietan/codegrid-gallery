@@ -1,0 +1,38 @@
+[
+  {
+    "query": "photography agency landing page listing photographers and directors, inviting you to write them a letter",
+    "expect_id": "2023_03_19_MODERN_LANDING_PAGE_DESIGN_HTML_CSS_JAVASCRIPT",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "stark minimal page like a terminal readout, two city codes, a prompt to enter",
+    "expect_id": "2023_03_19_MINIMALIST_LANDING_PAGE_REVEAL_ANIMATION_AWWWARDS_REMAKE",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "studio page about building digital brands, with the city and the time shown in a corner",
+    "expect_id": "2023_03_19_MODERN_LANDING_PAGE_USING_HTML_CSS_GSAP_AWWWARDS_REMAKE",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "personal portfolio of a freelance front-end developer with their name spread large across the screen",
+    "expect_id": "2023_03_19_PORTFOLIO_LANDING_PAGE_HTML_CSS_JAVASCRIPT_GSAP",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "agency page with a strip that repeats creative, media and technology across the screen",
+    "expect_id": "2023_03_19_LANDING_PAGE_ANIMATION_GSAP_AWWWARDS_REBUILD_HTML_CSS",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "landing page about digitizing ideas, nav with about, projects and services",
+    "expect_id": "2023_03_19_MODERN_LANDING_PAGE_HTML_CSS_GSAP_ANIMATION",
+    "filters": { "compType": "hero" }
+  },
+  {
+    "query": "photo shop page offering a collection of popular photos with a customer panel login",
+    "expect_id": "2023_03_19_GSAP_LANDING_PAGE_ANIMATION_HTML_CSS_GREENSOCK",
+    "filters": { "compType": "hero" },
+    "note": "genuinely hard: the corpus holds two near-identical rebuilds of this same page"
+  }
+]

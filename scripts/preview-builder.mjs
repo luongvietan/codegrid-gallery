@@ -432,6 +432,11 @@ export async function buildStaticPreview(options) {
   } catch (error) {
     return fallbackResult(inspection, zipBuffer, 'install-failed', error?.message);
   }
+  try {
+    discardForeignLockfiles(projectDir, inspection.packageManager, removeFile);
+  } catch (error) {
+    return fallbackResult(inspection, zipBuffer, 'install-failed', error?.message);
+  }
   const install = await runPhase('install', inspection, paths, runProcess);
   if (install.code !== 0) {
     return fallbackResult(inspection, zipBuffer, install.failureCode ?? 'install-failed', install.log);
@@ -473,6 +478,24 @@ export function reusedStaticPreview(inspection, zipBuffer) {
     }),
     log: '',
   };
+}
+
+function removeFile(target) {
+  if (!existsSync(target)) return false;
+  rmSync(target, { force: true });
+  return true;
+}
+
+/**
+ * npm reinstates an existing lockfile's optional dependencies even on `npm install`, and these
+ * archives ship lockfiles authored on macOS that name only darwin binaries. Left in place, the
+ * Linux container installs no @rollup/rollup-linux-x64-gnu and the bundler dies on require
+ * (npm/cli#4828, whose own error tells you to delete the lockfile). pnpm records every platform,
+ * so its lockfile stays and keeps the install reproducible.
+ */
+export function discardForeignLockfiles(projectDir, packageManager, remove = removeFile) {
+  if (packageManager === 'pnpm') return [];
+  return ['package-lock.json', 'npm-shrinkwrap.json'].filter((name) => remove(join(projectDir, name)));
 }
 
 export function isStaticBuildRuntime(runtime) {

@@ -184,7 +184,11 @@ test('inspection chooses npm commands and framework version from dependencies be
 
   assert.equal(result.root, '');
   assert.equal(result.runtime, 'cra');
-  assert.deepEqual(result.installCommand, ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+  assert.deepEqual(
+    result.installCommand,
+    ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
+    'a published lockfile records only its author platform, so ci would miss the Linux binaries',
+  );
   assert.deepEqual(result.devCommand, ['npm', 'start']);
   assert.deepEqual(result.buildCommand, ['npm', 'run', 'build']);
   assert.equal(result.frameworkVersion, '5.0.1');

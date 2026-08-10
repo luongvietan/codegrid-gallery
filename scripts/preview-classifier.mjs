@@ -162,11 +162,13 @@ function dependencyVersion(pkg, runtime) {
 }
 
 function commandsFor(runtime, packageManager, names, root, pkg) {
+  // Never `npm ci` here. These archives are authored on macOS and their lockfiles record only
+  // that platform's optional binaries — @rollup/rollup-darwin-arm64 and friends — so a faithful
+  // ci install leaves the Linux build container without @rollup/rollup-linux-x64-gnu and the
+  // bundler dies on require. `npm install` resolves the optional deps for the platform at hand.
   const installCommand = packageManager === 'pnpm'
     ? ['corepack', 'pnpm', 'install', '--frozen-lockfile', '--ignore-scripts']
-    : names.includes(`${root}package-lock.json`)
-      ? ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']
-      : ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'];
+    : ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'];
   const devCommand = pkg?.scripts?.dev
     ? packageManager === 'pnpm' ? ['corepack', 'pnpm', 'dev'] : ['npm', 'run', 'dev']
     : pkg?.scripts?.start

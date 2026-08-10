@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   buildStaticPreview,
   CONTAINER_IMAGE,
+  discardForeignLockfiles,
   dockerInvocation,
   measureStorageUsage,
   sourceHash,
@@ -491,4 +492,19 @@ test('builder creates the shared cache before a non-root install starts', async 
   });
 
   assert.equal(result.status, 'ready');
+});
+
+test('discards a macOS lockfile before installing, keeping pnpm reproducible', () => {
+  const removed = [];
+  const remove = (target) => { removed.push(target); return target.endsWith('package-lock.json'); };
+
+  assert.deepEqual(
+    discardForeignLockfiles('/workspace', 'npm', remove),
+    ['package-lock.json'],
+  );
+  assert.deepEqual(removed, [join('/workspace', 'package-lock.json'), join('/workspace', 'npm-shrinkwrap.json')]);
+
+  removed.length = 0;
+  assert.deepEqual(discardForeignLockfiles('/workspace', 'pnpm', remove), []);
+  assert.deepEqual(removed, [], 'pnpm lockfiles record every platform and stay put');
 });

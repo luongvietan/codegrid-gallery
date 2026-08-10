@@ -3,7 +3,50 @@ import assert from 'node:assert/strict';
 import {
   sanitizeFilename, folderNameForMessage, extractAttachments, classify, pickEntryHtml,
   slug, prettyTitle, pickThumbnail, buildProjectEntry, knownMsgIds, newestMsgId, mergeIndex,
+  artifactUploadArgs, awsInvocationEnv, retryDelayMs,
 } from './sync-lib.mjs';
+
+test('artifactUploadArgs sets immutable cache and content-addressed prefix', () => {
+  const args = artifactUploadArgs(
+    'C:/tmp/dist',
+    'sha256:abc',
+    'codegrid-gallery',
+    'https://r2.example',
+  );
+  assert.deepEqual(args, [
+    's3', 'cp', 'C:/tmp/dist', 's3://codegrid-gallery/previews/sha256:abc',
+    '--recursive', '--cache-control', 'public,max-age=31536000,immutable',
+    '--endpoint-url', 'https://r2.example',
+  ]);
+});
+
+test('retryDelayMs honors Retry-After and adds bounded exponential jitter', () => {
+  assert.equal(retryDelayMs(2, 7_000, () => 0), 7_000);
+  assert.equal(retryDelayMs(2, null, () => 0), 4_000);
+  assert.equal(retryDelayMs(2, null, () => 1), 5_000);
+});
+
+test('awsInvocationEnv caps each CLI invocation to one internal attempt', () => {
+  const env = awsInvocationEnv({
+    PATH: '/usr/bin',
+    HOME: '/home/runner',
+    DISCORD_TOKEN: 'must-not-forward',
+    R2_ACCESS_KEY_ID: 'r2-key',
+    R2_SECRET_ACCESS_KEY: 'r2-secret',
+    AWS_MAX_ATTEMPTS: '99',
+    AWS_RETRY_MODE: 'adaptive',
+  });
+
+  assert.deepEqual(env, {
+    PATH: '/usr/bin',
+    HOME: '/home/runner',
+    AWS_ACCESS_KEY_ID: 'r2-key',
+    AWS_SECRET_ACCESS_KEY: 'r2-secret',
+    AWS_DEFAULT_REGION: 'auto',
+    AWS_MAX_ATTEMPTS: '1',
+    AWS_RETRY_MODE: 'standard',
+  });
+});
 
 test('sanitizeFilename replaces invalid chars and trims', () => {
   assert.equal(sanitizeFilename('  a/b:c?*d  '), 'a_b_c__d');
@@ -46,7 +89,7 @@ test('extractAttachments returns empty buckets for message with no attachments',
   assert.deepEqual(extractAttachments({}), { zips: [], images: [], videos: [] });
 });
 
-test('classify: next.config => nextjs, package.json => react, else html', () => {
+test('classify remains a filename-only compatibility wrapper for ci-sync migration', () => {
   assert.equal(classify(['app/next.config.mjs', 'app/package.json']), 'nextjs');
   assert.equal(classify(['proj/package.json', 'proj/src/x.js']), 'react');
   assert.equal(classify(['index.html', 'style.css']), 'html');
@@ -73,15 +116,29 @@ test('pickThumbnail prefers png then jpg/webp', () => {
 test('buildProjectEntry shape', () => {
   const msg = { id: '7', timestamp: '2026-06-17T20:00:00Z', author: { username: 'harrnish' } };
   const att = { zips: [{ url: 'z', filename: 'CODE.zip', size: 1 }], images: [{ url: 'i', filename: 'c.jpg', size: 2 }], videos: [] };
-  const e = buildProjectEntry({ msg, folder: '2026-06-17_FOO', type: 'react', entryHtml: null, attachments: att });
+  const preview = { mode: 'static', status: 'ready', runtime: 'vite-react' };
+  const e = buildProjectEntry({ msg, folder: '2026-06-17_FOO', runtime: 'vite-react', preview, entryHtml: null, attachments: att });
   assert.equal(e.id, '2026_06_17_FOO');
   assert.equal(e.title, 'FOO');
   assert.equal(e.type, 'react');
+  assert.equal(e.runtime, 'vite-react');
+  assert.deepEqual(e.preview, preview);
   assert.equal(e.msgId, '7');
   assert.equal(e.thumbnail, 'c.jpg');
   assert.equal(e.zip, 'CODE.zip');
   assert.equal(e.author, 'harrnish');
   assert.deepEqual(e.media.zips, att.zips);
+});
+
+test('buildProjectEntry preserves the legacy type until ci-sync supplies a runtime', () => {
+  const msg = { id: '8', timestamp: '2026-06-18T20:00:00Z', author: { username: 'harrnish' } };
+  const attachments = { zips: [], images: [], videos: [] };
+
+  const entry = buildProjectEntry({ msg, folder: '2026-06-18_HTML', type: 'html', entryHtml: 'index.html', attachments });
+
+  assert.equal(entry.type, 'html');
+  assert.equal(entry.runtime, undefined);
+  assert.equal(entry.preview, undefined);
 });
 
 test('knownMsgIds and newestMsgId', () => {

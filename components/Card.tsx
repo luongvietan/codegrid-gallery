@@ -2,8 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Project } from '@/lib/types';
 import { assetUrl } from '@/lib/assets';
-
-const TYPE_LABEL: Record<string, string> = { html: 'HTML', nextjs: 'Next.js', react: 'React' };
+import { runtimeBucket, runtimeLabel } from '@/lib/runtime';
 
 export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) => void }) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -78,7 +77,7 @@ export default function Card({ p, onOpen }: { p: Project; onOpen: (p: Project) =
         )}
       </div>
       <div className="card-body">
-        <span className={`badge ${p.type}`}>{TYPE_LABEL[p.type]}</span>
+        <span className={`badge ${runtimeBucket(p)}`}>{runtimeLabel(p)}</span>
         {meta && <div className="card-meta">{meta}</div>}
         <div className="card-title">{p.title}</div>
       </div>

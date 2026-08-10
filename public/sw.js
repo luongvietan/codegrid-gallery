@@ -3,7 +3,12 @@
 // File được lưu trong Cache Storage (bền qua việc SW bị kill khi idle).
 
 const PREFIX = '__preview__/';
+const ROOT_PREFIX = '__root__/';
 const CACHE = 'codegrid-preview';
+const ISOLATION_HEADERS = {
+  'Cross-Origin-Embedder-Policy': 'credentialless',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
 
 const TYPES = {
   html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8',
@@ -37,7 +42,11 @@ self.addEventListener('message', (e) => {
       let n = 0;
       for (const [rel, buf] of Object.entries(files)) {
         await cache.put(keyFor(rel), new Response(buf, {
-          headers: { 'Content-Type': ctype(rel), 'Cache-Control': 'no-store' },
+          headers: {
+            'Content-Type': ctype(rel),
+            'Cache-Control': 'no-store',
+            ...ISOLATION_HEADERS,
+          },
         }));
         n++;
       }
@@ -51,15 +60,30 @@ self.addEventListener('message', (e) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   const i = url.pathname.indexOf(PREFIX);
-  if (i === -1) return;
-  let rel = decodeURIComponent(url.pathname.slice(i + PREFIX.length)).replace(/^\/+/, '');
-  event.respondWith(serve(rel));
+  if (i !== -1) {
+    const rel = decodeURIComponent(url.pathname.slice(i + PREFIX.length)).replace(/^\/+/, '');
+    event.respondWith(serve(rel));
+    return;
+  }
+
+  if (url.origin !== self.location.origin || event.request.method !== 'GET') return;
+  const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
+  event.respondWith(serveRootAliasOrNetwork(rel, event.request));
 });
 
 async function serve(rel) {
   const cache = await caches.open(CACHE);
   let res = await cache.match(keyFor(rel));
   if (!res && (rel === '' || rel.endsWith('/'))) res = await cache.match(keyFor(rel + 'index.html'));
-  if (!res) return new Response('Not found in preview: ' + rel, { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  if (!res) return new Response('Not found in preview: ' + rel, {
+    status: 404,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', ...ISOLATION_HEADERS },
+  });
   return res;
+}
+
+async function serveRootAliasOrNetwork(rel, request) {
+  const cache = await caches.open(CACHE);
+  const res = await cache.match(keyFor(ROOT_PREFIX + rel));
+  return res || fetch(request);
 }

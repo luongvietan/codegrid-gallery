@@ -58,7 +58,8 @@ async function embedTechniques(opts, cfg) {
 
   for (let i = 0; i < todo.length; i += 64) {
     const batch = todo.slice(i, i + 64);
-    const vecs = await embedBatch(batch.map(techniqueEmbeddingText));
+    const vecs = await embedBatch(batch.map(techniqueEmbeddingText),
+      { onWait: (ms) => console.log(`  rate limited — waiting ${Math.round(ms / 1000)}s`) });
     batch.forEach((t, j) => { registry.techniques[t.id].embedding = vecs[j]; });
     fs.writeFileSync(file, JSON.stringify(registry, null, 2));
     console.log(`  ${Math.min(i + 64, todo.length)}/${todo.length}`);
@@ -102,7 +103,8 @@ async function main() {
 
   for (let i = 0; i < toEmbed.length; i += 64) {
     const batch = toEmbed.slice(i, i + 64);
-    const vecs = await embedBatch(batch.map((b) => embeddingText(b.card)));
+    const vecs = await embedBatch(batch.map((b) => embeddingText(b.card)),
+      { onWait: (ms) => console.log(`  rate limited — waiting ${Math.round(ms / 1000)}s`) });
     batch.forEach((b, j) => {
       b.card.embedding = vecs[j];
       fs.writeFileSync(path.join(cardsDir, b.file), JSON.stringify(b.card, null, 2));

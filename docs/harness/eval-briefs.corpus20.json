@@ -1,0 +1,63 @@
+[
+  {
+    "query": "fullscreen hamburger menu that takes over the whole screen when you open it",
+    "expect_id": "2023_03_19_RESPONSIVE_FULLSCREEN_HAMBURGER_MENU_USING_HTML_CSS_GSAP",
+    "filters": { "scope": "overlay", "compType": "menu" },
+    "note": "paired with the slide-down menu below — tests whether two menus are distinguishable"
+  },
+  {
+    "query": "slim bar at the top that slides down to reveal the navigation links",
+    "expect_id": "2023_03_19_AWWWARDS_NAVIGATION_RESPONSIVE_SLIDE_DOWN_MENU_USING_HTML",
+    "filters": { "scope": "overlay", "compType": "menu" }
+  },
+  {
+    "query": "click a thumbnail and it grows smoothly into a fullscreen image viewer",
+    "expect_id": "2023_03_19_LIGHTBOX_GALLERY_USING_HTML_CSS_GSAP_FLIP_IMAGE_GALLERY",
+    "filters": { "scope": "overlay" }
+  },
+  {
+    "query": "images trail the cursor as you move across the page",
+    "expect_id": "2023_03_19_IMAGE_GALLERY_ANIMATION_AWWWARDS_REBUILD_CANVAS_MOUSEMOV",
+    "filters": { "compType": "gallery" }
+  },
+  {
+    "query": "photo grid where the pictures animate into place as you scroll down",
+    "expect_id": "2023_03_19_IMAGE_GALLERY_ANIMATION_ON_SCROLL_GSAP_SCROLLTRIGGER_ANIMA",
+    "filters": { "compType": "gallery" }
+  },
+  {
+    "query": "cards with a colour overlay that fades in when you hover, no javascript",
+    "expect_id": "2023_03_19_CARD_HOVER_EFFECT_IMAGE_HOVER_OVERLAY_CSS_PURE_CSS_HOVER",
+    "filters": { "compType": "gallery" }
+  },
+  {
+    "query": "slider you swipe sideways through a row of content panels",
+    "expect_id": "2023_03_19_RESPONSIVE_CONTENT_SLIDER_HTML_CSS_SWIPER_JS",
+    "filters": { "compType": "gallery" }
+  },
+  {
+    "query": "contact page with a form and the studio details beside it",
+    "expect_id": "2023_03_19_RESPONSIVE_CONTACT_US_PAGE_USING_HTML_CSS_RESPONSIVE_CON",
+    "filters": { "scope": "section" }
+  },
+  {
+    "query": "header that stays put while the logo shrinks as you scroll",
+    "expect_id": "2023_03_19_LOGO_SHRINK_ON_SCROLL_HEADER_ANIMATION_ON_SCROLL_HTML_C",
+    "filters": { "scope": "section" }
+  },
+  {
+    "query": "background layers drift with the mouse and a line of text scrolls across",
+    "expect_id": "2023_03_19_PARALLAX_LANDING_PAGE_MARQUEE_ANIMATION_MOUSEMOVE_PARALL",
+    "filters": { "scope": "section" }
+  },
+  {
+    "query": "list of projects where each link reacts as the pointer passes over it",
+    "expect_id": "2023_03_19_LINK_HOVER_ANIMATION_PROJECT_PAGE_DESIGN_USING_HTML_CSS",
+    "filters": { "scope": "section" }
+  },
+  {
+    "query": "intro screen that covers the site on load and then wipes away to reveal it",
+    "expect_id": "2023_03_19_AWWWARDS_REBUILD_WEBSITE_REVEAL_ANIMATION_ANIMATED_LANDI",
+    "filters": { "scope": "global" }
+  }
+]

@@ -17,22 +17,49 @@ export function embedConfig() {
   return { name, ...c };
 }
 
-/** Embed an array of strings. Batches of 64; throws with a clear message if the key is missing. */
-export async function embedBatch(texts) {
+/**
+ * How long to wait after a 429. Honours Retry-After when the server sends one,
+ * otherwise backs off 20s/40s/60s — Voyage's free tier is 3 requests per MINUTE,
+ * so second-scale backoff just burns the retries. Pure — unit-tested.
+ */
+export function backoffMs(attempt, retryAfterHeader) {
+  const secs = Number(retryAfterHeader);
+  if (Number.isFinite(secs) && secs > 0) return Math.min(secs, 120) * 1000;
+  return Math.min(20000 * (attempt + 1), 60000);
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Embed an array of strings, in batches, retrying rate limits.
+ * EMBED_BATCH defaults to 32: the free tier caps tokens-per-minute as well as
+ * requests, and a batch of 64 cards lands right on that ceiling.
+ */
+export async function embedBatch(texts, { onWait } = {}) {
   const c = embedConfig();
   const key = c.keyVar ? process.env[c.keyVar] : null;
   if (c.keyVar && !key) throw new Error(`Set ${c.keyVar} for EMBED_PROVIDER=${c.name}`);
+  const size = Math.max(1, +process.env.EMBED_BATCH || 32);
   const out = [];
-  for (let i = 0; i < texts.length; i += 64) {
-    const chunk = texts.slice(i, i + 64);
-    const resp = await fetch(c.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
-      body: JSON.stringify({ model: c.model, input: chunk }),
-    });
-    if (!resp.ok) throw new Error(`${c.name} embeddings HTTP ${resp.status}: ${await resp.text()}`);
-    const json = await resp.json();
-    for (const d of json.data) out.push(d.embedding);
+  for (let i = 0; i < texts.length; i += size) {
+    const chunk = texts.slice(i, i + size);
+    let lastBody = '';
+    let embedded = null;
+    for (let attempt = 0; attempt < 5 && !embedded; attempt++) {
+      const resp = await fetch(c.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+        body: JSON.stringify({ model: c.model, input: chunk }),
+      });
+      if (resp.ok) { embedded = (await resp.json()).data.map((d) => d.embedding); break; }
+      lastBody = await resp.text();
+      if (resp.status !== 429) throw new Error(`${c.name} embeddings HTTP ${resp.status}: ${lastBody}`);
+      const wait = backoffMs(attempt, resp.headers.get('retry-after'));
+      onWait?.(wait, attempt);
+      await sleep(wait);
+    }
+    if (!embedded) throw new Error(`${c.name} embeddings: still rate-limited after 5 attempts. ${lastBody.slice(0, 200)}`);
+    out.push(...embedded);
   }
   return out;
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveLlm, openaiPayload, readChoice } from './llm.mjs';
-import { embedConfig } from './provider.mjs';
+import { embedConfig, backoffMs } from './provider.mjs';
 
 test('resolveLlm defaults to anthropic claude-opus-4-8', () => {
   assert.deepEqual(resolveLlm({}), { provider: 'anthropic', model: 'claude-opus-4-8' });
@@ -81,6 +81,16 @@ test('embedConfig: default is voyage 1024, ollama is 1024 (bge-m3), openai is 15
   withEnv({ EMBED_PROVIDER: 'openai' }, () => {
     assert.equal(embedConfig().dim, 1536);
   });
+});
+
+test('backoffMs waits in minutes, not seconds, because the limit is per minute', () => {
+  // Voyage's free tier is 3 requests/minute — a 1s retry just burns an attempt.
+  assert.equal(backoffMs(0), 20000);
+  assert.equal(backoffMs(1), 40000);
+  assert.equal(backoffMs(9), 60000);      // capped
+  assert.equal(backoffMs(0, '5'), 5000);  // server knows better
+  assert.equal(backoffMs(0, '9999'), 120000);
+  assert.equal(backoffMs(0, 'soon'), 20000); // unparseable header ignored
 });
 
 test('embedConfig throws on an unknown provider', () => {

@@ -73,6 +73,7 @@ function packageManifest(contents: ArrayBuffer): {
   scripts: Record<string, string>;
   packageManager: string | null;
   hasNextDependency: boolean;
+  nextMajor: number | null;
 } {
   let parsed: unknown;
   try {
@@ -91,16 +92,19 @@ function packageManifest(contents: ArrayBuffer): {
   const packageManager = (parsed as { packageManager?: unknown }).packageManager;
   const dependencies = (parsed as { dependencies?: unknown }).dependencies;
   const devDependencies = (parsed as { devDependencies?: unknown }).devDependencies;
-  const hasNextDependency = [dependencies, devDependencies].some((group) => (
-    !!group
-    && typeof group === 'object'
-    && !Array.isArray(group)
-    && typeof (group as Record<string, unknown>).next === 'string'
-  ));
+  const nextVersion = [dependencies, devDependencies]
+    .map((group) => (
+      !!group && typeof group === 'object' && !Array.isArray(group)
+        ? (group as Record<string, unknown>).next
+        : null
+    ))
+    .find((version): version is string => typeof version === 'string') ?? null;
+  const nextMajorMatch = nextVersion?.trim().match(/^[~^<>=v\s]*(\d+)/);
   return {
     scripts: Object.fromEntries(validScripts),
     packageManager: typeof packageManager === 'string' ? packageManager : null,
-    hasNextDependency,
+    hasNextDependency: nextVersion !== null,
+    nextMajor: nextMajorMatch ? Number.parseInt(nextMajorMatch[1], 10) : null,
   };
 }
 
@@ -147,7 +151,7 @@ function commandsFor(
   const serverArgs = isNextDev || /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
     ? ['--hostname', '0.0.0.0']
     : [];
-  if (isNextDev) serverArgs.push('--webpack');
+  if (isNextDev && pkg.nextMajor !== null && pkg.nextMajor >= 16) serverArgs.push('--webpack');
   if (usesPnpm) {
     return {
       installCommand: hasPnpmLock

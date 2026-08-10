@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -51,4 +54,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -- data/index.json
           git commit -m "data: backfill static preview metadata"
-          git push
+          branch="${{ github.event.repository.default_branch }}"
+          git pull --rebase origin "$branch"
+          git push origin "HEAD:$branch"

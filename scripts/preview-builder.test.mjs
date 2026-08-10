@@ -1,9 +1,15 @@
 import assert from 'node:assert/strict';
-import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { buildStaticPreview, CONTAINER_IMAGE, dockerInvocation, sourceHash } from './preview-builder.mjs';
+import {
+  buildStaticPreview,
+  CONTAINER_IMAGE,
+  dockerInvocation,
+  measureStorageUsage,
+  sourceHash,
+} from './preview-builder.mjs';
 
 const paths = {
   projectDir: 'C:\\preview\\project',
@@ -45,6 +51,11 @@ test('build container has no network and no secret environment forwarding', () =
   assert.ok(args.includes('--memory=2g'));
   assert.ok(args.includes('--cpus=2'));
   assert.ok(args.includes('--pids-limit=256'));
+  assert.ok(args.includes('--read-only'));
+  assert.deepEqual(args.slice(args.indexOf('--tmpfs'), args.indexOf('--tmpfs') + 2), [
+    '--tmpfs',
+    '/tmp:rw,nosuid,nodev,size=256m,mode=1777',
+  ]);
   assert.deepEqual(args.filter((arg) => arg.startsWith('--network=')), ['--network=none']);
   assert.deepEqual(args.filter((arg) => arg.startsWith('--memory=')), ['--memory=2g']);
   assert.deepEqual(args.filter((arg) => arg.startsWith('--cpus=')), ['--cpus=2']);
@@ -63,6 +74,7 @@ test('install container can use the shared npm cache and disables lifecycle scri
   }).args;
 
   assert.ok(args.includes('--network=bridge'));
+  assert.ok(args.includes('--read-only'));
   assert.deepEqual(args.slice(args.indexOf('--user'), args.indexOf('--user') + 2), ['--user', '1234:5678']);
   assert.ok(args.includes(`${paths.cacheDir}:/npm-cache`));
   assert.ok(args.includes('HOME=/tmp'));
@@ -71,6 +83,12 @@ test('install container can use the shared npm cache and disables lifecycle scri
     'NPM_CONFIG_CACHE=/npm-cache',
   ]);
   assert.deepEqual(args.slice(-5), ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+});
+
+test('build container never mounts the writable install cache', () => {
+  const args = dockerInvocation('build', viteInspection, paths).args;
+
+  assert.equal(args.some((arg) => arg.includes(paths.cacheDir) || arg.includes('/npm-cache')), false);
 });
 
 test('CRA build sets a relative public URL inside the container', () => {
@@ -106,8 +124,8 @@ test('builder installs then builds and returns a ready manifest', async (t) => {
   assert.equal(result.preview.mode, 'static');
   assert.equal(result.preview.status, 'ready');
   assert.equal(result.preview.entry, 'index.html');
-  assert.equal(result.preview.sourceHash, 'sha256:fb2a4a08b7f102b9e1fa84505082195dc01f5e63992d75487cca4b667e664c90');
-  assert.equal(result.preview.artifactBase, 'previews/sha256:fb2a4a08b7f102b9e1fa84505082195dc01f5e63992d75487cca4b667e664c90/');
+  assert.equal(result.preview.sourceHash, 'sha256:945fd29d566d4388a984faf72aabd79403c93c74ed83a3905cb5c0e4ac26de07');
+  assert.equal(result.preview.artifactBase, 'previews/sha256:945fd29d566d4388a984faf72aabd79403c93c74ed83a3905cb5c0e4ac26de07/');
   assert.equal(result.outputDir, join(outputPaths.projectDir, 'dist'));
 });
 
@@ -320,11 +338,11 @@ test('project storage quota terminates and cleans the active build container', a
     zipBuffer: Buffer.from('storage flood'),
     ...paths,
     createContainerName: (phase) => `codegallery-${phase}-quota-test`,
-    projectStorageLimits: { maxFiles: 5, maxBytes: 100 },
+    projectStorageLimits: { maxEntries: 5, maxBytes: 100 },
     storagePollIntervalMs: 1,
-    measureProjectStorage: (_projectDir, phase) => phase === 'build'
-      ? { fileCount: 6, totalBytes: 1 }
-      : { fileCount: 1, totalBytes: 1 },
+    measureStorage: (_directory, _limits, kind, phase) => phase === 'build' && kind === 'project'
+      ? { entryCount: 6, totalBytes: 1, exceeded: true }
+      : { entryCount: 1, totalBytes: 1, exceeded: false },
     runProcess: async (invocation) => {
       calls.push(invocation);
       if (invocation.phase === 'build') {
@@ -338,6 +356,80 @@ test('project storage quota terminates and cleans the active build container', a
   assert.equal(result.preview.failureCode, 'build-storage-limit');
   assert.deepEqual(calls.map(({ phase }) => phase), ['install', 'build', 'cleanup']);
   assert.deepEqual(calls[2].args, ['rm', '-f', 'codegallery-build-quota-test']);
+});
+
+test('storage measurement counts directories and stops as soon as the entry limit is exceeded', (t) => {
+  const temporaryDir = mkdtempSync(join(tmpdir(), 'preview-builder-entry-budget-'));
+  t.after(() => rmSync(temporaryDir, { recursive: true, force: true }));
+  for (let index = 0; index < 8; index += 1) mkdirSync(join(temporaryDir, `dir-${index}`));
+
+  const usage = measureStorageUsage(temporaryDir, { maxEntries: 2, maxBytes: 1024 });
+
+  assert.deepEqual(usage, { entryCount: 3, totalBytes: 0, exceeded: true });
+});
+
+test('install cache quota terminates the container and clears the oversized cache', async (t) => {
+  const calls = [];
+  let finishInstall;
+  const temporaryDir = mkdtempSync(join(tmpdir(), 'preview-builder-cache-budget-'));
+  t.after(() => rmSync(temporaryDir, { recursive: true, force: true }));
+  const projectDir = join(temporaryDir, 'project');
+  const cacheDir = join(temporaryDir, 'cache');
+  mkdirSync(projectDir);
+  mkdirSync(cacheDir);
+  writeFileSync(join(cacheDir, 'oversized-entry'), 'cache');
+  const result = await buildStaticPreview({
+    inspection: viteInspection,
+    zipBuffer: Buffer.from('cache flood'),
+    projectDir,
+    cacheDir,
+    createContainerName: (phase) => `codegallery-${phase}-cache-test`,
+    installCacheLimits: { maxEntries: 5, maxBytes: 100 },
+    storagePollIntervalMs: 1,
+    measureStorage: (_directory, _limits, kind) => kind === 'cache'
+      ? { entryCount: 6, totalBytes: 1, exceeded: true }
+      : { entryCount: 1, totalBytes: 1, exceeded: false },
+    runProcess: async (invocation) => {
+      calls.push(invocation);
+      if (invocation.phase === 'install') {
+        return new Promise((resolve) => { finishInstall = resolve; });
+      }
+      if (invocation.phase === 'cleanup') finishInstall?.({ code: 137, stdout: '', stderr: 'terminated' });
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+
+  assert.equal(result.preview.failureCode, 'build-storage-limit');
+  assert.deepEqual(calls.map(({ phase }) => phase), ['install', 'cleanup']);
+  assert.deepEqual(calls[1].args, ['rm', '-f', 'codegallery-install-cache-test']);
+  assert.deepEqual(readdirSync(cacheDir), []);
+});
+
+test('final storage measurement catches growth after a phase exits', async () => {
+  const calls = [];
+  let projectMeasurements = 0;
+  const result = await buildStaticPreview({
+    inspection: viteInspection,
+    zipBuffer: Buffer.from('final measurement race'),
+    ...paths,
+    createContainerName: (phase) => `codegallery-${phase}-final-test`,
+    projectStorageLimits: { maxEntries: 5, maxBytes: 100 },
+    storagePollIntervalMs: 60_000,
+    measureStorage: (_directory, _limits, kind) => {
+      if (kind === 'cache') return { entryCount: 1, totalBytes: 1, exceeded: false };
+      projectMeasurements += 1;
+      return projectMeasurements === 1
+        ? { entryCount: 1, totalBytes: 1, exceeded: false }
+        : { entryCount: 6, totalBytes: 1, exceeded: true };
+    },
+    runProcess: async (invocation) => {
+      calls.push(invocation);
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+
+  assert.equal(result.preview.failureCode, 'build-storage-limit');
+  assert.deepEqual(calls.map(({ phase }) => phase), ['install', 'cleanup']);
 });
 
 test('timeout forces removal of the named container', async () => {

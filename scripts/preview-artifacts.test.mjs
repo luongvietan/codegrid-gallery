@@ -17,7 +17,7 @@ const build = {
     artifactBase: 'previews/sha256:abc/',
     entry: 'index.html',
     status: 'ready',
-    builderVersion: 2,
+    builderVersion: 3,
     failureCode: null,
   },
 };
@@ -75,7 +75,7 @@ test('publishing clears incomplete files and writes the completion manifest last
     sourceHash: 'sha256:abc',
     runtime: 'vite-react',
     entry: 'index.html',
-    builderVersion: 2,
+    builderVersion: 3,
   });
 });
 

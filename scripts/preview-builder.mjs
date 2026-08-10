@@ -1,18 +1,22 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 
-export const BUILDER_VERSION = 2;
+export const BUILDER_VERSION = 3;
 export const CONTAINER_IMAGE = 'node:20.19.4-bookworm-slim@sha256:a25e59a5562406b0a4f34ce94ccad6c3902dcf3269b40e1fe12d881090c6f9be';
 export const DEFAULT_ARTIFACT_LIMITS = {
   maxFiles: 25_000,
   maxBytes: 250 * 1024 * 1024,
 };
 export const DEFAULT_PROJECT_STORAGE_LIMITS = {
-  maxFiles: 200_000,
+  maxEntries: 200_000,
   maxBytes: 2 * 1024 * 1024 * 1024,
+};
+export const DEFAULT_INSTALL_CACHE_LIMITS = {
+  maxEntries: 100_000,
+  maxBytes: 1024 * 1024 * 1024,
 };
 
 const CONTAINER_LIMITS = ['--memory=2g', '--cpus=2', '--pids-limit=256'];
@@ -85,6 +89,9 @@ export function dockerInvocation(phase, inspection, paths) {
       containerName,
       '--user',
       containerUser,
+      '--read-only',
+      '--tmpfs',
+      '/tmp:rw,nosuid,nodev,size=256m,mode=1777',
       ...CONTAINER_LIMITS,
       ...network,
       ...mounts,
@@ -136,33 +143,36 @@ function artifactBudgetError(message) {
   return error;
 }
 
-function validatedLimits(limits, label) {
-  if (!limits || !Number.isSafeInteger(limits.maxFiles) || limits.maxFiles < 1
+function validatedLimits(limits, label, countKey) {
+  if (!limits || !Number.isSafeInteger(limits[countKey]) || limits[countKey] < 1
     || !Number.isSafeInteger(limits.maxBytes) || limits.maxBytes < 1) {
     throw new Error(`${label} limits must be positive safe integers`);
   }
   return limits;
 }
 
-function measureDirectory(root) {
-  const usage = { fileCount: 0, totalBytes: 0 };
+export function measureStorageUsage(root, limits) {
+  const bounded = validatedLimits(limits, 'Storage', 'maxEntries');
+  const usage = { entryCount: 0, totalBytes: 0, exceeded: false };
   if (!existsSync(root)) return usage;
 
   function visit(candidate) {
+    if (usage.exceeded) return;
     const stat = lstatSync(candidate);
+    usage.entryCount += 1;
+    if (stat.isFile() || stat.isSymbolicLink()) usage.totalBytes += stat.size;
+    usage.exceeded = usage.entryCount > bounded.maxEntries || usage.totalBytes > bounded.maxBytes;
+    if (usage.exceeded) return;
     if (stat.isDirectory() && !stat.isSymbolicLink()) {
       for (const name of readdirSync(candidate)) visit(join(candidate, name));
-      return;
     }
-    usage.fileCount += 1;
-    usage.totalBytes += stat.size;
   }
 
   visit(root);
   return usage;
 }
 
-function exceedsLimits(usage, limits) {
+function exceedsArtifactLimits(usage, limits) {
   return usage.fileCount > limits.maxFiles || usage.totalBytes > limits.maxBytes;
 }
 
@@ -174,7 +184,7 @@ function validateOutputDirectory(outputDir, limits = DEFAULT_ARTIFACT_LIMITS) {
   const resolvedRoot = realpathSync(outputDir);
 
   const usage = { fileCount: 0, totalBytes: 0 };
-  const bounded = limits ? validatedLimits(limits, 'Artifact') : null;
+  const bounded = limits ? validatedLimits(limits, 'Artifact', 'maxFiles') : null;
 
   function visit(candidate) {
     const stat = lstatSync(candidate);
@@ -188,7 +198,7 @@ function validateOutputDirectory(outputDir, limits = DEFAULT_ARTIFACT_LIMITS) {
     } else if (stat.isFile()) {
       usage.fileCount += 1;
       usage.totalBytes += stat.size;
-      if (bounded && exceedsLimits(usage, bounded)) {
+      if (bounded && exceedsArtifactLimits(usage, bounded)) {
         throw artifactBudgetError('Preview output exceeds the file-count or total-byte limit');
       }
     }
@@ -246,23 +256,73 @@ async function cleanupContainer(containerName, runProcess) {
   }
 }
 
-async function monitorProjectStorage(phase, paths, isStopped) {
-  while (!isStopped()) {
+function measurePhaseStorage(phase, paths) {
+  const targets = [
+    { directory: paths.projectDir, limits: paths.projectStorageLimits, kind: 'project' },
+    ...(phase === 'install'
+      ? [{ directory: paths.cacheDir, limits: paths.installCacheLimits, kind: 'cache' }]
+      : []),
+  ];
+  for (const target of targets) {
     let usage;
     try {
-      usage = paths.measureProjectStorage(paths.projectDir, phase);
+      usage = paths.measureStorage(target.directory, target.limits, target.kind, phase);
     } catch (error) {
-      return { exceeded: true, log: `Unable to measure project storage: ${error?.message ?? error}` };
-    }
-    if (exceedsLimits(usage, paths.projectStorageLimits)) {
       return {
         exceeded: true,
-        log: `Project storage limit exceeded (${usage.fileCount} files, ${usage.totalBytes} bytes)`,
+        kind: target.kind,
+        log: `Unable to measure ${target.kind} storage: ${error?.message ?? error}`,
       };
     }
-    await new Promise((resolve) => setTimeout(resolve, paths.storagePollIntervalMs));
+    if (usage.exceeded
+      || usage.entryCount > target.limits.maxEntries
+      || usage.totalBytes > target.limits.maxBytes) {
+      return {
+        exceeded: true,
+        kind: target.kind,
+        log: `${target.kind} storage limit exceeded (${usage.entryCount} entries, ${usage.totalBytes} bytes)`,
+      };
+    }
   }
   return { exceeded: false, log: '' };
+}
+
+async function monitorPhaseStorage(phase, paths, state) {
+  while (!state.stopped) {
+    const result = measurePhaseStorage(phase, paths);
+    if (result.exceeded) return result;
+    await new Promise((resolve) => {
+      state.wake = resolve;
+      state.timer = setTimeout(resolve, paths.storagePollIntervalMs);
+    });
+    state.timer = null;
+    state.wake = null;
+  }
+  return { exceeded: false, log: '' };
+}
+
+function stopStorageMonitor(state) {
+  state.stopped = true;
+  if (state.timer) clearTimeout(state.timer);
+  state.wake?.();
+}
+
+async function storageLimitResult(result, containerName, paths, runProcess) {
+  const cleanupLog = await cleanupContainer(containerName, runProcess);
+  let cacheLog = '';
+  if (result.kind === 'cache') {
+    try {
+      rmSync(paths.cacheDir, { recursive: true, force: true });
+      mkdirSync(paths.cacheDir, { recursive: true });
+    } catch (error) {
+      cacheLog = `Unable to clear install cache: ${error?.message ?? error}`;
+    }
+  }
+  return {
+    code: 1,
+    failureCode: 'build-storage-limit',
+    log: publicLog([result.log, cleanupLog, cacheLog]),
+  };
 }
 
 async function runPhase(phase, inspection, paths, runProcess) {
@@ -274,7 +334,7 @@ async function runPhase(phase, inspection, paths, runProcess) {
     maxBuffer: MAX_LOG_BYTES,
     env: hostEnvironment(),
   };
-  let stopped = false;
+  const monitorState = { stopped: false, timer: null, wake: null };
   const processOutcome = Promise.resolve()
     .then(() => runProcess(invocation))
     .then((processResult) => ({
@@ -290,18 +350,13 @@ async function runPhase(phase, inspection, paths, runProcess) {
         log: publicLog([error?.stdout, error?.stderr, error?.message]),
       },
     }));
-  const storageOutcome = monitorProjectStorage(phase, paths, () => stopped)
+  const storageOutcome = monitorPhaseStorage(phase, paths, monitorState)
     .then((result) => ({ kind: 'storage', result }));
   const outcome = await Promise.race([processOutcome, storageOutcome]);
-  stopped = true;
+  stopStorageMonitor(monitorState);
 
   if (outcome.kind === 'storage' && outcome.result.exceeded) {
-    const cleanupLog = await cleanupContainer(containerName, runProcess);
-    return {
-      code: 1,
-      failureCode: 'build-storage-limit',
-      log: publicLog([outcome.result.log, cleanupLog]),
-    };
+    return storageLimitResult(outcome.result, containerName, paths, runProcess);
   }
   const result = outcome.result;
   if (result.code !== 0) {
@@ -310,6 +365,10 @@ async function runPhase(phase, inspection, paths, runProcess) {
       code: result.code,
       log: publicLog([result.log, cleanupLog]),
     };
+  }
+  const finalStorage = measurePhaseStorage(phase, paths);
+  if (finalStorage.exceeded) {
+    return storageLimitResult(finalStorage, containerName, paths, runProcess);
   }
   return {
     code: result.code,
@@ -329,8 +388,9 @@ export async function buildStaticPreview(options) {
     containerUser = defaultContainerUser(),
     artifactLimits = DEFAULT_ARTIFACT_LIMITS,
     projectStorageLimits = DEFAULT_PROJECT_STORAGE_LIMITS,
+    installCacheLimits = DEFAULT_INSTALL_CACHE_LIMITS,
     storagePollIntervalMs = STORAGE_POLL_INTERVAL,
-    measureProjectStorage = measureDirectory,
+    measureStorage = measureStorageUsage,
   } = options;
 
   if (inspection.runtime === 'nextjs') {
@@ -362,9 +422,10 @@ export async function buildStaticPreview(options) {
     cacheDir,
     createContainerName,
     containerUser,
-    projectStorageLimits: validatedLimits(projectStorageLimits, 'Project storage'),
+    projectStorageLimits: validatedLimits(projectStorageLimits, 'Project storage', 'maxEntries'),
+    installCacheLimits: validatedLimits(installCacheLimits, 'Install cache', 'maxEntries'),
     storagePollIntervalMs,
-    measureProjectStorage,
+    measureStorage,
   };
   try {
     mkdirSync(cacheDir, { recursive: true });

@@ -28,6 +28,28 @@ export const SIDE_EFFECT_BUDGET = {
 // Two smooth-scroll libraries on one page is not a budget question, it is a reject.
 const SMOOTH_SCROLL_LIBS = ['lenis', 'locomotive', 'scrollsmoother'];
 
+/**
+ * What the index can actually supply, as a line for the planner prompt.
+ *
+ * The first real composition run asked for an `about` section; the corpus holds
+ * zero of them (also none for pricing, faq, stats — the annotator never reaches
+ * for those labels). Planning a slot the index cannot fill is not a retrieval
+ * failure to be reported later, it is a plan that was wrong when written. So the
+ * planner is told the inventory, with counts, and types below `min` are omitted:
+ * a single card of some type cannot survive the conflict budget rejecting it.
+ */
+export function inventoryOf(cards, min = 2) {
+  const counts = {};
+  for (const c of cards) counts[c.comp_type] = (counts[c.comp_type] || 0) + 1;
+  return Object.entries(counts)
+    .filter(([, n]) => n >= min)
+    .sort((a, b) => b[1] - a[1]);
+}
+
+export function formatInventory(inventory) {
+  return inventory.map(([type, n]) => `${type} (${n})`).join(', ');
+}
+
 export function validatePlan(plan) {
   const errors = [];
   if (!plan || typeof plan !== 'object') return { ok: false, errors: ['plan is not an object'] };
@@ -92,12 +114,20 @@ export function newBudgetState() { return { counts: {}, libs: new Set() }; }
  * top-down, so an early hero gets first claim on the scroll and a later section
  * has to earn its place with a component that cooperates.
  */
-export function planSelection(slots, candidatesBySlot, state = newBudgetState()) {
+export function planSelection(slots, candidatesBySlot, state = newBudgetState(), minSim = 0) {
   const picks = [], rejected = [], unfilled = [];
   for (const slot of slots) {
     const candidates = candidatesBySlot[slot.key] || [];
     let taken = null, lastReason = 'no candidate survived the filters';
     for (const c of candidates) {
+      // A weak match is a worse outcome than an empty slot: the slot gets filled,
+      // the brief says "done", and nobody notices the page has a horizontal
+      // scroll experiment standing in for smooth scrolling. Below the floor the
+      // slot goes to "write fresh", where the technique index can serve it.
+      if (minSim && (c.sim ?? 0) < minSim) {
+        lastReason = `best match scored ${(c.sim ?? 0).toFixed(2)}, below the ${minSim} floor — nothing in the index really fits`;
+        break;
+      }
       const verdict = admit(state, c.card);
       if (verdict.ok) { taken = c; break; }
       rejected.push({ slot: slot.key, id: c.card.id, reason: verdict.reason });

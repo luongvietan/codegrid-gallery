@@ -21,16 +21,17 @@ import { ENUMS } from './schema.mjs';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
 import { embedBatch, embedConfig } from './provider.mjs';
 import { rankLocal, rankTechniques } from './retrieval.mjs';
-import { validatePlan, planSelection, normalizeTokens, buildBrief } from './composition.mjs';
+import { validatePlan, planSelection, normalizeTokens, buildBrief, inventoryOf, formatInventory } from './composition.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CANDIDATES_PER_SLOT = 8; // deep enough that the budget has a fallback to take
 
 function parseArgs(argv) {
-  const o = { corpus: path.join(ROOT, 'corpus'), terms: [], plan: null, out: null, filters: {} };
+  const o = { corpus: path.join(ROOT, 'corpus'), terms: [], plan: null, out: null, filters: {}, minSim: 0.5 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--plan') o.plan = path.resolve(argv[++i]);
+    else if (a === '--min-sim') o.minSim = Math.max(0, +argv[++i] || 0);
     else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
     else if (a === '--out') o.out = path.resolve(argv[++i]);
     else if (a === '--exclude-lib') o.filters.excludeAnimLibs = [...(o.filters.excludeAnimLibs || []), ...argv[++i].split(',')];
@@ -42,21 +43,24 @@ function parseArgs(argv) {
 
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'composition';
 
-function planPrompt(brief) {
+function planPrompt(brief, inventory) {
   return `You are planning the SKELETON of a website before any code is retrieved. Return ONLY one JSON object: {"title": "...", "slots": [{"key","scope","comp_type","intent"}, ...]}.
 
 BRIEF: ${brief}
 
+WHAT THE LIBRARY ACTUALLY HOLDS (type and how many). Plan against THIS, not against the full vocabulary — a slot of a type that is absent can never be filled:
+${inventory}
+
 RULES:
 1. 5-9 slots, in the order they appear down the page. Globals (cursor, smooth_scroll, preloader, scroll_progress) and overlays (menu, modal, lightbox, page_transition) are their own slots, listed last.
-2. "scope" is one of: ${ENUMS.scope.join(', ')}. "comp_type" is one of: ${ENUMS.comp_type.join(', ')}. A cursor is scope "global", NOT a section.
+2. "scope" is one of: ${ENUMS.scope.join(', ')}. "comp_type" MUST come from the inventory above. A cursor is scope "global", NOT a section.
 3. "key": short lowercase identifier, unique ("hero", "work", "cursor").
 4. "intent": one phrase in DESIGNER vocabulary describing what that slot should look and feel like — this string is the retrieval query, so write it the way you would describe the finished thing, not the code. Good: "dark full-bleed hero, headline reveals line by line on load". Bad: "hero using SplitText".
 5. Only include what the brief actually needs. A page with fewer, sharper sections beats nine generic ones.`;
 }
 
-async function makePlan(chat, brief) {
-  const messages = [{ role: 'user', content: planPrompt(brief) }];
+async function makePlan(chat, brief, inventory) {
+  const messages = [{ role: 'user', content: planPrompt(brief, inventory) }];
   let lastErr = 'unknown';
   for (let i = 0; i < 3; i++) {
     const text = await chat(messages, 8000); // reasoning models bill thinking against this
@@ -116,7 +120,7 @@ async function main() {
     let chat;
     try { chat = await createChat(llm); } catch (e) { console.error(e.message); process.exit(1); }
     console.log(`Planning with ${llm.provider}:${llm.model}...`);
-    plan = await makePlan(chat, brief);
+    plan = await makePlan(chat, brief, formatInventory(inventoryOf(cards)));
   }
   console.log(`Plan "${plan.title}": ${plan.slots.map((s) => s.key).join(' -> ')}`);
 
@@ -130,7 +134,9 @@ async function main() {
     }, CANDIDATES_PER_SLOT);
   });
 
-  const selection = planSelection(plan.slots, candidatesBySlot);
+  // 0.5 is read off one real run (good picks 0.59-0.67, bad ones 0.45-0.49),
+  // not derived from anything — --min-sim 0 restores the old fill-anything behaviour.
+  const selection = planSelection(plan.slots, candidatesBySlot, undefined, opts.minSim);
   const tokenPlan = normalizeTokens(selection.picks);
 
   // Unfilled slots are where the technique index earns its keep: nothing fits, so

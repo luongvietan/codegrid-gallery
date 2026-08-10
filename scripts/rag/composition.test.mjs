@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  validatePlan, admit, planSelection, normalizeTokens, integrationNotes, buildBrief,
+  validatePlan, admit, planSelection, newBudgetState, normalizeTokens, integrationNotes, buildBrief,
+  inventoryOf, formatInventory,
 } from './composition.mjs';
 
 const plan = (over = {}) => ({
@@ -46,6 +47,21 @@ test('validatePlan rejects duplicate slot keys and an empty plan', () => {
   assert.equal(dup.ok, false);
   assert.ok(dup.errors.some((e) => /duplicate slot key/.test(e)));
   assert.equal(validatePlan({ title: 't', slots: [] }).ok, false);
+});
+
+test('inventoryOf reports what the index can actually supply, commonest first', () => {
+  // The first real run planned an "about" slot against a corpus holding zero of
+  // them. A type with one card is worse than useless: the budget can reject it
+  // and leave the slot empty anyway, so `min` drops it from the planner's menu.
+  const cards = [
+    ...Array(5).fill(0).map((_, i) => card('h' + i, { comp_type: 'hero' })),
+    ...Array(2).fill(0).map((_, i) => card('g' + i, { comp_type: 'gallery' })),
+    card('solo', { comp_type: 'lightbox' }),
+  ];
+  assert.deepEqual(inventoryOf(cards), [['hero', 5], ['gallery', 2]]);
+  assert.deepEqual(inventoryOf(cards, 1), [['hero', 5], ['gallery', 2], ['lightbox', 1]]);
+  assert.equal(formatInventory(inventoryOf(cards)), 'hero (5), gallery (2)');
+  assert.deepEqual(inventoryOf([]), []);
 });
 
 // ---------- the conflict matrix ----------
@@ -117,6 +133,20 @@ test('planSelection takes the best candidate that survives the budget', () => {
   assert.equal(sel.unfilled.length, 0);
   assert.deepEqual(sel.rejected.map((r) => r.id), ['work_hijack']);
   assert.match(sel.rejected[0].reason, /scroll_hijack/);
+});
+
+test('planSelection leaves a slot empty rather than take a weak match', () => {
+  // From the first real run: smooth_scroll was filled at sim 0.485 by an infinite
+  // horizontal scroll experiment, while genuine picks scored 0.59-0.67. A filled
+  // slot reads as success, so the bad fit ships silently.
+  const slots = [{ key: 'smooth', scope: 'global', comp_type: 'smooth_scroll', intent: 'weightless scrolling' }];
+  const candidates = { smooth: [{ card: card('weak', { scope: 'global', comp_type: 'smooth_scroll' }), sim: 0.485 }] };
+
+  assert.equal(planSelection(slots, candidates).picks.length, 1);            // no floor: taken
+  const gated = planSelection(slots, candidates, newBudgetState(), 0.5);
+  assert.deepEqual(gated.picks, []);
+  assert.equal(gated.unfilled.length, 1);
+  assert.match(gated.unfilled[0].reason, /0\.48.*below the 0\.5 floor/);
 });
 
 test('planSelection reports a slot it could not fill, with the reason', () => {

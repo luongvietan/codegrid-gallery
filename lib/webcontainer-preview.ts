@@ -119,18 +119,33 @@ async function acquireRuntime(
   const previous = bootQueue.catch(() => {});
   let releaseSlot = () => {};
   const slot = new Promise<void>((resolve) => { releaseSlot = resolve; });
+  let slotReleased = false;
+  const releaseSchedulingSlot = () => {
+    if (slotReleased) return;
+    slotReleased = true;
+    releaseSlot();
+  };
   bootQueue = previous.then(() => slot);
 
   await previous;
   if (signal.aborted) {
-    releaseSlot();
+    releaseSchedulingSlot();
+    return null;
+  }
+
+  const releaseAbortedBoot = () => releaseSchedulingSlot();
+  signal.addEventListener('abort', releaseAbortedBoot, { once: true });
+  if (signal.aborted) {
+    signal.removeEventListener('abort', releaseAbortedBoot);
+    releaseSchedulingSlot();
     return null;
   }
 
   try {
     const container = await boot({ coep: 'credentialless' });
+    signal.removeEventListener('abort', releaseAbortedBoot);
     if (signal.aborted) {
-      try { container.teardown(); } finally { releaseSlot(); }
+      try { container.teardown(); } finally { releaseSchedulingSlot(); }
       return null;
     }
 
@@ -140,11 +155,12 @@ async function acquireRuntime(
       release() {
         if (released) return;
         released = true;
-        try { container.teardown(); } finally { releaseSlot(); }
+        try { container.teardown(); } finally { releaseSchedulingSlot(); }
       },
     };
   } catch (error) {
-    releaseSlot();
+    signal.removeEventListener('abort', releaseAbortedBoot);
+    releaseSchedulingSlot();
     throw error;
   }
 }

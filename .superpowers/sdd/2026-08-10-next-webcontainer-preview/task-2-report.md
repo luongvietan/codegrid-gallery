@@ -211,6 +211,25 @@ node --test lib/webcontainer-preview.test.mjs
 # exit 0 — 10 passed, 0 failed
 ```
 
+Final shared verification passed:
+
+```text
+npm run test:pipeline
+# exit 0 — 108 passed, 0 failed
+
+npx eslint lib/webcontainer-preview.ts lib/webcontainer-preview.test.mjs components/ProjectModal.tsx components/tabs/RuntimePreviewTab.tsx lib/webcontainer-runtime.ts
+# exit 0
+
+npx tsc --noEmit
+# exit 0
+
+npm run build
+# exit 0
+```
+
+The build emitted only the previously documented multiple-lockfile/Turbopack
+root warning.
+
 The deadline tests assert normalized retryable failures for every phase, install
 retry to ready, tracked process/listener/container cleanup, late boot teardown,
 and late dev-process kill without weakening the existing Strict Mode/singleton
@@ -234,3 +253,43 @@ npm run build
 
 The build retains only the previously documented multiple-lockfile/Turbopack
 root warning.
+
+## Residual Important fix — retry after an unresolved timed-out boot
+
+### Root cause and RED
+
+The boot deadline allowed the visible run to fail, but `acquireRuntime` retained
+its global scheduling slot until the unresolved `WebContainer.boot()` promise
+settled. Retry therefore queued behind a promise that might never resolve and
+could hit its own boot deadline without invoking `boot()`.
+
+Extended the boot-timeout regression so it starts a retry and requires that
+retry to reach ready before the first boot promise resolves. Only after retry
+cleanup does the test resolve the late first container and assert immediate
+teardown, zero mount/spawn calls, and no stale snapshots.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 1 — 9 passed, 1 failed
+# bootOrder was ["first"] instead of ["first", "retry"]
+```
+
+### GREEN and ownership decision
+
+The boot acquisition now gives its scheduling slot an idempotent release
+function and attaches it to the acquisition signal while `boot()` is pending.
+A boot deadline releases scheduling ownership immediately, so retry can call
+`boot()` and make progress. The stale boot promise retains its own aborted signal;
+if it resolves later, its container is synchronously torn down and is never
+returned, mounted, spawned, or allowed to emit state. Slot release remains
+idempotent across abort, late resolution, error, and normal lease teardown.
+
+The earlier Strict Mode test's obsolete requirement that replacement boot wait
+for late teardown was updated to the new contract. It still verifies no stale
+updates and cleanup, while the expanded deadline test verifies that the late
+container has no active lifecycle effects.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 0 — 10 passed, 0 failed
+```

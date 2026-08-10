@@ -330,6 +330,31 @@ the better path so much as the only one.
 The floor is doing its job in those runs, not misfiring: refusing a 0.3 match is
 the difference between a page with a wrong section and a page with an honest gap.
 
+### In domain, there is no winner
+
+Out of domain the question answers itself. Repeating the A/B where the index does
+have good components — two runs per build, since the judge is not deterministic:
+
+| brief | plan | A — reused | B — all written |
+|---|---|---|---|
+| photography studio | 6 filled | 1 blocker / 6 findings, 1 blocker / 5 | 1 blocker / 1 finding, 1 blocker / 1 |
+| editorial agency | 4 filled | **0 blockers** twice | 0 blockers / 3, **1 blocker** / 1 |
+| product launch | 0 filled | (excluded — nothing to compare) | — |
+
+Blockers tie on photography and are marginally *better* for reuse on agency, where
+A was stable at zero across both runs and B was not. Generation's real advantage
+is total findings: 1 against 5–6.
+
+That advantage is partly confounded. Measuring what is actually on each page:
+the photography B page carries more than A (8 sections, 284 nodes, 1749 chars of
+text against 4/90/839) and still drew fewer findings, which is a genuine win. The
+agency B page carries *less* (896 chars and one visual against 2011 and fourteen),
+so some of its quiet is simply less surface to criticise.
+
+**So the default stays as it is: reuse above the similarity floor, write below it.**
+The evidence does not support always-generating when a good component exists — the
+earlier single-composition result that suggested it was overfitted to one run.
+
 That experiment also found a real bug. The planner was shown the inventory of the
 **whole** corpus while the query's filters left a tenth of it, so it planned a
 footer slot with zero eligible candidates. Inventory is now computed after the

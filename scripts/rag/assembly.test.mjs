@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed, rewriteAssetPaths,
+  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed, rewriteAssetPaths, isEsModule, bareImportsOf,
 } from './assembly.mjs';
 
 // ---------- pulling a page apart ----------
@@ -169,4 +169,42 @@ test('buildPage emits one document with sections, scoped css and merged scripts'
   assert.ok(html.indexOf('data-slot="hero"') < html.indexOf('data-slot="work"'));  // slot order is page order
   assert.ok(html.includes('<script src="https://cdn/gsap.js"></script>'));
   assert.ok(html.includes('/* hero */'));
+});
+
+test('buildPage emits one import map before the module sections that need it', () => {
+  const html = buildPage({
+    sections: [
+      { slot: 'hero', html: '<h1>Hi</h1>', css: '', js: 'console.log(1)' },
+      { slot: 'work', html: '<div id="react-root-work"></div>', css: '', module: 'import React from "react";' },
+    ],
+    importMap: { imports: { react: 'https://esm.sh/react@19.2.0' } },
+  });
+  assert.ok(html.includes('<script type="importmap">'));
+  assert.ok(html.includes('https://esm.sh/react@19.2.0'));
+  // A module script resolves its bare specifiers against a map declared earlier.
+  assert.ok(html.indexOf('importmap') < html.indexOf('type="module"'));
+  assert.ok(html.includes('<script type="module">'));
+  assert.ok(html.includes('/* hero */'));      // plain scripts still wrapped per section
+});
+
+test('buildPage omits the import map when nothing needs one', () => {
+  const html = buildPage({ sections: [{ slot: 'hero', html: '<h1>Hi</h1>', css: '', js: '' }] });
+  assert.ok(!html.includes('importmap'));
+});
+
+test('isEsModule spots a script that cannot be wrapped in an IIFE', () => {
+  // Found in the browser, not the build: a vanilla page shipping ESM was dropped
+  // into a plain <script>, threw "Cannot use import statement outside a module",
+  // and its section was dead while the rest of the page rendered fine.
+  assert.equal(isEsModule('import gsap from "gsap";\ngsap.to(x)'), true);
+  assert.equal(isEsModule("import './style.css'"), true);
+  assert.equal(isEsModule('export const a = 1'), true);
+  assert.equal(isEsModule('const x = 1; el.addEventListener("click", fn)'), false);
+  // A word that merely contains "import" is not an import.
+  assert.equal(isEsModule('const important = 1'), false);
+});
+
+test('bareImportsOf collects only dependencies, for the import map', () => {
+  const js = 'import gsap from "gsap";\nimport { x } from "./local.js";\nimport "lenis/dist/lenis.css";';
+  assert.deepEqual(bareImportsOf(js), ['gsap', 'lenis/dist/lenis.css']);
 });

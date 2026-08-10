@@ -17,8 +17,9 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, buildPage, containFixed, rewriteAssetPaths,
+  scopeCss, rewriteTokens, buildPage, containFixed, rewriteAssetPaths, isEsModule, bareImportsOf,
 } from './assembly.mjs';
+import { pickReactEntry, isBareSpecifier, buildImportMap, retargetMount, rootIdFor } from './react-lib.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -58,6 +59,42 @@ function inlineLocalAssets(html, projectDir, entryRel) {
   return { css: css.filter(Boolean).join('\n'), js: js.filter(Boolean).join('\n') };
 }
 
+/**
+ * Bundle a React project into one module, leaving every dependency to the import
+ * map. esbuild resolves the project's own files; nothing is installed, which
+ * matters because the ingest never captured node_modules.
+ */
+async function bundleReact(projectDir, entry, slot) {
+  let esbuild;
+  try { esbuild = await import('esbuild'); }
+  catch { throw new Error('React picks need esbuild: npm i -D esbuild'); }
+
+  const bare = new Set();
+  const result = await esbuild.build({
+    entryPoints: [path.join(projectDir, entry)],
+    bundle: true, write: false, format: 'esm', target: 'es2020',
+    // outdir is required even with write:false — without it esbuild refuses to
+    // split imported CSS out of the JS, which every CRA project does.
+    outdir: 'dist',
+    jsx: 'automatic', loader: { '.js': 'jsx', '.jsx': 'jsx', '.png': 'dataurl', '.jpg': 'dataurl', '.jpeg': 'dataurl', '.svg': 'dataurl', '.webp': 'dataurl', '.gif': 'dataurl' },
+    logLevel: 'silent',
+    plugins: [{
+      name: 'externalise-bare',
+      setup(build) {
+        build.onResolve({ filter: /.*/ }, (args) => {
+          if (!isBareSpecifier(args.path)) return null;
+          bare.add(args.path);
+          return { path: args.path, external: true };
+        });
+      },
+    }],
+  });
+
+  const js = result.outputFiles.filter((f) => f.path.endsWith('.js')).map((f) => f.text).join('\n');
+  const css = result.outputFiles.filter((f) => f.path.endsWith('.css')).map((f) => f.text).join('\n');
+  return { js: retargetMount(js, rootIdFor(slot)), css, bare: [...bare] };
+}
+
 function entryHtmlOf(record) {
   const files = (record.files || []).map((f) => f.path);
   if (record.entryHtml && files.includes(record.entryHtml)) return record.entryHtml;
@@ -75,6 +112,7 @@ async function main() {
   const plan = JSON.parse(fs.readFileSync(planFile, 'utf8'));
 
   const bySlot = new Map();
+  const bareSpecs = [];
   const externalCss = [];
   const externalJs = [];
   const skipped = [];
@@ -84,9 +122,49 @@ async function main() {
     const recFile = path.join(opts.corpus, pick.id, '.ingest.json');
     if (!fs.existsSync(cardFile) || !fs.existsSync(recFile)) { skipped.push({ ...pick, why: 'not in the corpus' }); continue; }
     const card = JSON.parse(fs.readFileSync(cardFile, 'utf8'));
-    if (card.framework !== 'vanilla') { skipped.push({ ...pick, why: `framework "${card.framework}" needs a build step this script does not have` }); continue; }
-
     const record = JSON.parse(fs.readFileSync(recFile, 'utf8'));
+
+    // Next owns routing, layout and (app router) server rendering. `app/page.js`
+    // is a module in a framework, not a component you can mount into a section,
+    // so these stay out rather than being half-supported.
+    if (card.framework === 'next' || card.framework === 'vue' || card.framework === 'svelte') {
+      skipped.push({ ...pick, why: `${card.framework} needs its own runtime — a page is not a mountable component` });
+      continue;
+    }
+
+    // The card's framework comes from the archive's own label, which is wrong
+    // often enough to matter: a project tagged react whose files are index.html
+    // + script.js + styles.css is a vanilla page. Trust what is on disk.
+    const filePaths = (record.files || []).map((f) => f.path);
+    const reactEntry = pickReactEntry(filePaths);
+    const looksReact = !!reactEntry && filePaths.some((f) => /\.(jsx|tsx)$/i.test(f) || /(^|\/)src\//i.test(f));
+
+    if (card.framework === 'react' && looksReact) {
+      const projectDir = path.join(opts.corpus, pick.id);
+      const entry = reactEntry;
+      try {
+        const built = await bundleReact(projectDir, entry, pick.slot);
+        built.bare.forEach((b) => bareSpecs.push(b));
+        const scope = `[data-slot="${pick.slot}"]`;
+        const rewrite = (plan.rewrites || {})[pick.id] || {};
+        bySlot.set(pick.slot, {
+          slot: pick.slot,
+          html: `<div id="${rootIdFor(pick.slot)}"></div>`,
+          css: scopeCss(containFixed(rewriteTokens(built.css, rewrite)), scope),
+          module: built.js,
+          origin: 'reused',
+        });
+        console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 40)} · react bundle ${Math.round(built.js.length / 1024)} KB, ${built.bare.length} dep(s)`);
+      } catch (e) {
+        skipped.push({ ...pick, why: `react bundle failed: ${e.message.split('\n')[0].slice(0, 120)}` });
+      }
+      continue;
+    }
+    if (card.framework !== 'vanilla' && !entryHtmlOf(record)) {
+      skipped.push({ ...pick, why: `labelled ${card.framework} and has no HTML entry to fall back on` });
+      continue;
+    }
+
     const entry = entryHtmlOf(record);
     if (!entry) { skipped.push({ ...pick, why: 'no HTML entry file' }); continue; }
 
@@ -97,6 +175,7 @@ async function main() {
     externalJs.push(ext.js);
 
     const local = inlineLocalAssets(html, projectDir, entry);
+    if (isEsModule(local.js)) bareImportsOf(local.js).forEach((b) => bareSpecs.push(b));
     const rewrite = (plan.rewrites || {})[pick.id] || {};
     const scope = `[data-slot="${pick.slot}"]`;
 
@@ -124,7 +203,9 @@ async function main() {
       // Global components (a cursor, a smooth-scroll driver) keep their fixed
       // layers; a section's must be pinned to the section.
       css: scopeCss(rewriteAssetPaths(card.scope === 'global' ? rewriteTokens(local.css, rewrite) : containFixed(rewriteTokens(local.css, rewrite)), assetPrefix), scope),
-      js: local.js,
+      // A page that ships ESM must stay a module: an IIFE-wrapped import throws
+      // and kills the section without touching the rest of the page.
+      ...(isEsModule(local.js) ? { module: local.js } : { js: local.js }),
       origin: 'reused',
     });
     console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js, ${copied} image(s)`);
@@ -159,6 +240,7 @@ async function main() {
     tokens: plan.tokens || {},
     externals: { css: dedupeExternals(externalCss), js: dedupeExternals(externalJs) },
     sections,
+    importMap: bareSpecs.length ? buildImportMap(bareSpecs) : null,
   });
   fs.writeFileSync(path.join(outDir, 'index.html'), page);
 

@@ -203,13 +203,35 @@ export function rewriteAssetPaths(text, prefix) {
     .replace(/url\(\s*(["']?)([^"')]+)\1\s*\)/gi, (m, q, url) => `url(${q}${fix(url)}${q})`);
 }
 
+/**
+ * Does this script need to be a module?
+ *
+ * Some of these pages ship ESM — `import gsap from "gsap"` at the top of
+ * script.js. Wrapped in an IIFE and dropped into a plain <script> it throws
+ * "Cannot use import statement outside a module" and the whole section is dead,
+ * silently, because the rest of the page still renders.
+ */
+export function isEsModule(js) {
+  return /^\s*(import\s[\s\S]*?from\s|import\s*[{'"(]|export\s)/m.test(String(js ?? ''));
+}
+
+/** The bare specifiers an ESM script imports, so they can join the import map. */
+export function bareImportsOf(js) {
+  const out = [];
+  for (const m of String(js ?? '').matchAll(/\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g)) {
+    const spec = m[1] || m[2];
+    if (spec && !spec.startsWith('.') && !spec.startsWith('/') && !/^[a-z]+:/i.test(spec)) out.push(spec);
+  }
+  return [...new Set(out)];
+}
+
 /** Each component's script gets its own scope: two pages both declaring `const
  *  container` at top level would throw on the second one. */
 export function wrapJs(js, slot) {
   return `/* ${slot} */\n(function () {\n${String(js ?? '').trim()}\n})();`;
 }
 
-export function buildPage({ title = 'Composed page', tokens = {}, externals = { css: [], js: [] }, sections = [] }) {
+export function buildPage({ title = 'Composed page', tokens = {}, externals = { css: [], js: [] }, sections = [], importMap = null }) {
   const colors = tokens.colors || {};
   const rootVars = [
     colors.bg && `--page-bg: ${colors.bg};`,
@@ -223,6 +245,12 @@ export function buildPage({ title = 'Composed page', tokens = {}, externals = { 
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${title}</title>`,
     ...externals.css.map((h) => `<link rel="stylesheet" href="${h}">`),
+    // The import map must precede any module script that uses it, and a document
+    // gets exactly one — so every React section's dependencies are merged into it.
+    ...(importMap && Object.keys(importMap.imports || {}).length
+      ? [`<script type="importmap">
+${JSON.stringify(importMap, null, 2)}
+</script>`] : []),
     `<style>\n:root { ${rootVars} }\nhtml, body { margin: 0; padding: 0; background: ${colors.bg || '#fff'}; color: ${colors.fg || '#000'}; }\n/* position: the anchor that containFixed's absolutes resolve against.\n   overflow: without it those absolutes contribute no height, so a section's\n   content spills over the sections below it — a work list painted across the\n   contact and menu screens was how that showed up. */\n[data-slot] { position: relative; overflow: hidden; }\n${sections.map((s) => s.css).filter(Boolean).join('\n')}\n</style>`,
   ].join('\n  ');
 
@@ -230,6 +258,9 @@ export function buildPage({ title = 'Composed page', tokens = {}, externals = { 
   const scripts = [
     ...externals.js.map((s) => `<script src="${s}"></script>`),
     sections.some((s) => s.js) ? `<script>\n${sections.filter((s) => s.js).map((s) => wrapJs(s.js, s.slot)).join('\n\n')}\n</script>` : '',
+    // Bundled React sections get one module each, so a throw while mounting one
+    // cannot stop the others — a single shared module would take the page down.
+    ...sections.filter((s) => s.module).map((s) => `<script type="module">\n/* ${s.slot} */\n${s.module}\n</script>`),
   ].filter(Boolean).join('\n');
 
   return `<!doctype html>

@@ -33,7 +33,7 @@ function findEndOfCentralDirectory(zipBuffer) {
   return eocdOffset;
 }
 
-function readCentralDirectoryRecords(zipBuffer) {
+export function readCentralDirectoryRecords(zipBuffer) {
   if (!Buffer.isBuffer(zipBuffer) || zipBuffer.length < 22) throw new Error('Invalid ZIP archive');
   const eocdOffset = findEndOfCentralDirectory(zipBuffer);
   const diskNumber = zipBuffer.readUInt16LE(eocdOffset + 4);
@@ -123,7 +123,7 @@ function shallowestRecord(records, predicate) {
     .sort((left, right) => left.name.split('/').length - right.name.split('/').length || left.name.length - right.name.length)[0] || null;
 }
 
-function packageRecord(records) {
+export function packageRecord(records) {
   return shallowestRecord(records, (record) => /(^|\/)package\.json$/i.test(record.name)
     && !record.name.split('/').some((segment) => segment.toLowerCase() === 'node_modules'));
 }

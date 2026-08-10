@@ -9,8 +9,7 @@ import MediaTab from './tabs/MediaTab';
 import PreviewTab from './tabs/PreviewTab';
 import RuntimePreviewTab from './tabs/RuntimePreviewTab';
 import StaticPreviewTab from './tabs/StaticPreviewTab';
-
-const TYPE_LABEL: Record<string, string> = { html: 'HTML', nextjs: 'Next.js', react: 'React' };
+import { runtimeBucket, runtimeLabel } from '@/lib/runtime';
 
 interface SourceState {
   projectKey: string;
@@ -103,7 +102,7 @@ export default function ProjectModal({ p, onClose, onToast }: {
       <div className="modal-panel">
         <div className="modal-head">
           <div className="modal-title">
-            <span className={`badge ${p.type}`}>{TYPE_LABEL[p.type]}</span>
+            <span className={`badge ${runtimeBucket(p)}`}>{runtimeLabel(p)}</span>
             <div className="modal-title-text">
               <h2>{p.title}</h2>
               <div className="modal-sub">{sub}</div>

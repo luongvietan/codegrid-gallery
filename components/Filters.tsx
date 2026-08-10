@@ -1,24 +1,27 @@
 'use client';
-import type { ProjectType } from '@/lib/types';
+import { BUCKET_LABEL, type RuntimeBucket } from '@/lib/runtime';
 
-export type Filter = 'all' | ProjectType;
+export type Filter = 'all' | RuntimeBucket;
 export type SortKey = 'date-desc' | 'date-asc' | 'title' | 'type-asc' | 'type-desc';
 
-const CHIPS: { type: Filter; label: string }[] = [
-  { type: 'all', label: 'Tất cả' },
-  { type: 'html', label: 'HTML' },
-  { type: 'nextjs', label: 'Next.js' },
-  { type: 'react', label: 'React' },
-];
+const BUCKET_CHIPS: RuntimeBucket[] = ['html', 'vite', 'react', 'nextjs', 'other'];
 
 export default function Filters({
-  filter, setFilter, sort, setSort, search, setSearch, meta,
+  filter, setFilter, sort, setSort, search, setSearch, meta, counts,
 }: {
   filter: Filter; setFilter: (f: Filter) => void;
   sort: SortKey; setSort: (s: SortKey) => void;
   search: string; setSearch: (s: string) => void;
   meta: string;
+  counts: Record<RuntimeBucket, number>;
 }) {
+  // An empty bucket would only be a dead end, so it stays out of the row.
+  const chips: { type: Filter; label: string }[] = [
+    { type: 'all', label: 'Tất cả' },
+    ...BUCKET_CHIPS
+      .filter((bucket) => counts[bucket] > 0)
+      .map((bucket) => ({ type: bucket as Filter, label: BUCKET_LABEL[bucket] })),
+  ];
   return (
     <header className="topbar">
       <div className="brand">
@@ -51,15 +54,16 @@ export default function Filters({
             <option value="date-desc">Mới nhất trước</option>
             <option value="date-asc">Cũ nhất trước</option>
             <option value="title">Title A→Z</option>
-            <option value="type-asc">Loại: HTML → React → Next.js</option>
-            <option value="type-desc">Loại: Next.js → React → HTML</option>
+            <option value="type-asc">Runtime: HTML → Vite → React → Next.js</option>
+            <option value="type-desc">Runtime: Next.js → React → Vite → HTML</option>
           </select>
         </div>
-        <div className="filters">
-          {CHIPS.map((c) => (
+        <div className="filters" role="group" aria-label="Lọc theo runtime">
+          {chips.map((c) => (
             <button
               key={c.type}
               className={`chip ${filter === c.type ? 'active' : ''}`}
+              aria-pressed={filter === c.type}
               onClick={() => setFilter(c.type)}
             >{c.label}</button>
           ))}

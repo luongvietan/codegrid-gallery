@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { ENUMS } from './schema.mjs';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
 import { embedBatch, embedConfig } from './provider.mjs';
-import { rankLocal, rankTechniques } from './retrieval.mjs';
+import { rankLocal, rankTechniques, applyFilters } from './retrieval.mjs';
 import { validatePlan, planSelection, normalizeTokens, buildBrief, inventoryOf, formatInventory } from './composition.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -122,7 +122,12 @@ async function main() {
     let chat;
     try { chat = await createChat(llm); } catch (e) { console.error(e.message); process.exit(1); }
     console.log(`Planning with ${llm.provider}:${llm.model}...`);
-    plan = await makePlan(chat, brief, formatInventory(inventoryOf(cards)));
+    // Inventory AFTER the filters, not before. Showing the planner the whole
+    // corpus while --mood light --touch-safe leaves a tenth of it made it plan a
+    // footer slot with zero eligible candidates — a plan that was wrong when
+    // written, against a menu that did not exist for this query.
+    const eligible = cards.filter((c) => applyFilters(c, opts.filters));
+    plan = await makePlan(chat, brief, formatInventory(inventoryOf(eligible)));
   }
   console.log(`Plan "${plan.title}": ${plan.slots.map((s) => s.key).join(' -> ')}`);
 

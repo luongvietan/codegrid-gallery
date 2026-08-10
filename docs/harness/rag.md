@@ -308,3 +308,29 @@ unusable".
 Scope this honestly: one composition, one brief, two runs per build, and a judge
 that is not deterministic. It is evidence that generating beats transplanting
 *here*, not a benchmark.
+
+### Four briefs, and a different conclusion
+
+Repeating the A/B on three deliberately unlike briefs changed the reading:
+
+| brief | plan | A — components reused | B — all written |
+|---|---|---|---|
+| dark editorial studio | 3 filled | revise 2/5, 1–2 blockers | revise 3/5, **0 blockers** |
+| ceramics shop (bright, commercial) | **0 filled** | **cannot be built** | revise 3/5, 0 blockers |
+| developer tool (documentation) | **0 filled** | **cannot be built** | revise 3/5, 1 blocker |
+| illustrator portfolio (maximalist) | 2 filled | reject 1/5, 2 blockers | reject 2/5, **2 blockers** |
+
+Generation does not simply win. On the maximalist brief the two tie on blockers.
+What actually separates the rows is **domain**: the best available similarity for
+an in-domain brief is 0.59–0.69, and for ceramics or a dev tool it is 0.27–0.44 —
+below the floor for every slot. This corpus is an archive of dark editorial
+awwwards rebuilds. Outside that, there is nothing to reuse, and generation is not
+the better path so much as the only one.
+
+The floor is doing its job in those runs, not misfiring: refusing a 0.3 match is
+the difference between a page with a wrong section and a page with an honest gap.
+
+That experiment also found a real bug. The planner was shown the inventory of the
+**whole** corpus while the query's filters left a tenth of it, so it planned a
+footer slot with zero eligible candidates. Inventory is now computed after the
+filters — a plan can only ask for what this query can actually supply.

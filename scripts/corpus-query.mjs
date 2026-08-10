@@ -11,7 +11,7 @@
 // by match density and path relevance. Run `scripts/ingest.mjs` first.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -102,4 +102,5 @@ function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// pathToFileURL: `file://` + a Windows argv[1] never matches import.meta.url.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) main();

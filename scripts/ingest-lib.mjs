@@ -199,6 +199,10 @@ export function planDownloads(index, base) {
     id: p.id,
     folder: p.folder,
     type: p.type,
+    // Carried through to the ingest record: the annotator reads the title for
+    // context and puts entryHtml's file first, so losing them costs real quality.
+    title: p.title ?? null,
+    entryHtml: p.entryHtml ?? null,
     zip: p.zip,
     url: p.zip ? zipUrl(base, p.folder, p.zip) : null,
     expectedZipBytes: p.media?.zips?.[0]?.size ?? null,

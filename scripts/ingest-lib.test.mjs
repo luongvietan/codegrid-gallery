@@ -165,6 +165,17 @@ test('planDownloads builds R2 urls and carries expected zip size', () => {
   assert.equal(plan[1].url, null);
 });
 
+test('planDownloads carries title and entryHtml through to the ingest record', () => {
+  // writeProject reads item.title / item.entryHtml; dropping them here made every
+  // record claim the project had no title and no entry file.
+  const plan = planDownloads({
+    projects: [{ id: 'p1', folder: 'f', type: 'html', zip: 'CODE.zip',
+      title: 'NAV MENU', entryHtml: 'nav menu/index.html', media: { zips: [] } }],
+  }, 'https://x.r2.dev');
+  assert.equal(plan[0].title, 'NAV MENU');
+  assert.equal(plan[0].entryHtml, 'nav menu/index.html');
+});
+
 test('humanBytes formats across units', () => {
   assert.equal(humanBytes(512), '512 B');
   assert.equal(humanBytes(1536), '1.5 KB');

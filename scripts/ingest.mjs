@@ -16,7 +16,7 @@
 // from inside a sandbox with an egress policy the bucket may be blocked.
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   planDownloads, extractZip, partitionEntries, summarizeProject, aggregate,
   safeRelPath, langOf, humanBytes,
@@ -265,6 +265,9 @@ async function main() {
 // Exported for the offline end-to-end test (scripts/ingest.test.mjs).
 export { writeProject, writeCorpus, renderCorpusMd, renderAgentsMd };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, not string concatenation: on Windows argv[1] is `C:\...`, which
+// never equals import.meta.url's `file:///C:/...` — the script would exit 0 in
+// silence, having done nothing.
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((e) => { console.error(`[FATAL] ${e.message}`); process.exit(1); });
 }

@@ -68,6 +68,7 @@ filters (`--exclude-hijack`, `--exclude-lib locomotive`), not composer patches.
 | 4. Search | `node scripts/rag/search.mjs "dark editorial hero" --type hero --exclude-hijack` | cards (`--supabase` for the RPC) |
 | 5. Techniques | `node scripts/rag/extract-techniques.mjs` → `embed.mjs --techniques` → `search.mjs "…" --techniques` | cards + the same keys |
 | 6. Compose | `node scripts/rag/compose.mjs "dark editorial studio site"` | embedded cards (+ techniques) |
+| 7. Critique | `node scripts/rag/critique.mjs ./out/index.html --composition corpus/compositions/studio-site` | a rendered page + a vision model |
 
 ## The technique pass (step 5)
 
@@ -194,7 +195,43 @@ is exactly the job the technique index exists for.
 `--plan file.json` skips the LLM planner (also how the pass is smoke-tested offline).
 The composer is DB-free: it reads cards and techniques from disk, no Supabase needed.
 
-## Not yet built (deliberate next passes)
+## The visual feedback loop (step 7)
 
-- **Visual feedback loop** — Playwright screenshot → VLM critique → fix. This is what
-  turns the pipeline into an agent; without it you have a demo.
+Every pass before this one reasons about code through *text*. A card claims "the
+headline bleeds off both edges" and retrieval simply believes it; nothing has ever
+looked at the result. `critique.mjs` renders the assembled page (desktop 1440 and a
+real 390px touch phone), hands both screenshots to a vision model, and validates the
+answer against `validateCritique` — the same enum-and-retry discipline as every other
+LLM step here.
+
+What makes it a loop rather than a review:
+
+- **Findings are addressed, not observed.** Each finding names a slot; the fix plan
+  resolves that slot through the composition's `plan.json` to the component that
+  produced it and the corpus path of its source. "The hero is too tall" is a review;
+  "`src_042`, which you took for the hero, is too tall, source at `corpus/src_042/`"
+  is a work order.
+- **The verdict cannot lie.** `ship` alongside a blocker finding fails validation and
+  is sent back. The pass exists to stop the pipeline from congratulating itself.
+- **It gates.** A blocker exits non-zero, so a build loop can refuse to finish.
+- **Pages are pre-scrolled before capture.** Most of this corpus is scroll-driven; a
+  page that is never scrolled shows its entry state forever and the model would be
+  reviewing an empty screen.
+
+Playwright is an **optional** dependency (`npm i playwright && npx playwright install
+chromium`) — the repo stays dependency-free, and `--shots a.png,b.png` critiques
+images you already have, with no browser at all. `VISION_MODEL` overrides the chat
+model, because a strong code model (`qwen3-coder`) usually cannot see; locally,
+`ollama pull qwen2.5vl` covers it.
+
+Applying the fixes is deliberately **not** automated: that is a code edit, and a
+script doing it blind would be guessing. The loop is render → critique → the agent
+edits → render again, until blockers reach zero.
+
+## Still missing
+
+- **No pass has been run against the real corpus yet** — the whole chain is verified
+  offline (unit tests + fake endpoints). Step 3's eval gate is what should decide
+  whether the schema survives contact with 400 real sources.
+- **No eval for the composer or the critique** — retrieval has a top-3 hit-rate gate;
+  selection and critique quality have no equivalent measurement yet.

@@ -129,3 +129,42 @@ No Task 2 blocker remains. Real-browser cross-origin isolation, a live Next.js
 ZIP boot, modal-close cleanup observation, and static/legacy preview regression
 checks are intentionally left to Task 3 browser QA as required by the task
 boundary.
+
+## Round 1 review fix — install output rejection
+
+### Root cause
+
+The install output reader was saved for a later wait, but the lifecycle first
+waited for `install.exit`. If the output stream rejected while the exit promise
+remained unresolved, the reader rejection was temporarily unhandled and could
+not reach the runner's normalized failure and cleanup path. The dev output path
+already avoided this by forwarding reader rejection into the shared
+`runtimeError` promise.
+
+### RED
+
+Added a focused regression case whose install output rejects with
+`install output unavailable` while `install.exit` never settles. The test also
+requires a failure snapshot, process/container cleanup, and a successful retry.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 1 — 5 passed, 1 failed
+# failing error: install output unavailable
+```
+
+The failure was the expected unhandled stream rejection; the run otherwise
+remained pending until the test cancellation guard fired.
+
+### GREEN
+
+Attached the install reader rejection immediately and forwarded it into the same
+`runtimeError` channel used by the dev reader. This makes the existing install
+exit race reject immediately, after which the normal catch/finally path publishes
+the normalized failure, kills the process, tears down the container, and releases
+the lease for retry.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 0 — 6 passed, 0 failed
+```

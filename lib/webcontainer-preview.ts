@@ -216,7 +216,9 @@ export async function runRuntimePreview({
       cancelled,
     ]);
     processes.add(install);
-    const installOutput = streamOutput(install);
+    const installOutput = streamOutput(install).catch((streamError) => {
+      rejectRuntimeError(streamError);
+    });
     const installExit = await Promise.race([install.exit, runtimeError, cancelled]);
     await Promise.race([installOutput, runtimeError, cancelled]);
     if (installExit !== 0) {

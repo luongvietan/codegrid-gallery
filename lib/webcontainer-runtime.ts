@@ -1,16 +1,7 @@
+import type { DirectoryNode, FileSystemTree } from '@webcontainer/api';
 import type { ExtractedZip } from './zip.ts';
 
-export interface RuntimeFile {
-  file: Uint8Array;
-}
-
-export interface RuntimeDirectory {
-  directory: FileSystemTree;
-}
-
-export interface FileSystemTree {
-  [name: string]: RuntimeFile | RuntimeDirectory;
-}
+export type { FileSystemTree } from '@webcontainer/api';
 
 export interface RuntimeProject {
   files: FileSystemTree;
@@ -74,11 +65,11 @@ function sourceEntries(zip: ExtractedZip): Array<{ name: string; segments: strin
 
 function manifestEntry(entries: Array<{ name: string; segments: string[]; contents: ArrayBuffer }>) {
   return entries
-    .filter((entry) => entry.segments.at(-1)?.toLowerCase() === 'package.json')
+    .filter((entry) => entry.segments.at(-1) === 'package.json')
     .sort((left, right) => left.segments.length - right.segments.length || left.name.localeCompare(right.name))[0];
 }
 
-function packageManifest(contents: ArrayBuffer): { scripts: Record<string, string> } {
+function packageManifest(contents: ArrayBuffer): { scripts: Record<string, string>; packageManager: string | null } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(contents));
@@ -93,10 +84,14 @@ function packageManifest(contents: ArrayBuffer): { scripts: Record<string, strin
   const validScripts = Object.entries(scripts).filter((entry): entry is [string, string] => (
     typeof entry[1] === 'string' && entry[1].trim().length > 0
   ));
-  return { scripts: Object.fromEntries(validScripts) };
+  const packageManager = (parsed as { packageManager?: unknown }).packageManager;
+  return {
+    scripts: Object.fromEntries(validScripts),
+    packageManager: typeof packageManager === 'string' ? packageManager : null,
+  };
 }
 
-function isDirectory(entry: RuntimeFile | RuntimeDirectory): entry is RuntimeDirectory {
+function isDirectory(entry: FileSystemTree[string]): entry is DirectoryNode {
   return 'directory' in entry;
 }
 
@@ -107,7 +102,7 @@ function buildFileTree(entries: Array<{ segments: string[]; contents: ArrayBuffe
     for (const segment of entry.segments.slice(0, -1)) {
       const current = directory[segment];
       if (!current) {
-        const child: RuntimeDirectory = { directory: Object.create(null) as FileSystemTree };
+        const child: DirectoryNode = { directory: Object.create(null) as FileSystemTree };
         directory[segment] = child;
         directory = child.directory;
       } else if (isDirectory(current)) {
@@ -119,23 +114,30 @@ function buildFileTree(entries: Array<{ segments: string[]; contents: ArrayBuffe
 
     const fileName = entry.segments.at(-1);
     if (!fileName || directory[fileName]) return invalidProject();
-    directory[fileName] = { file: new Uint8Array(entry.contents.slice(0)) };
+    directory[fileName] = { file: { contents: new Uint8Array(entry.contents.slice(0)) } };
   }
   return tree;
 }
 
-function commandsFor(root: string, names: string[], scripts: Record<string, string>): Pick<RuntimeProject, 'installCommand' | 'devCommand'> {
+function commandsFor(
+  root: string,
+  names: string[],
+  pkg: ReturnType<typeof packageManifest>,
+): Pick<RuntimeProject, 'installCommand' | 'devCommand'> {
   const hasPnpmLock = names.includes(`${root}pnpm-lock.yaml`);
   const hasNpmLock = names.includes(`${root}package-lock.json`) || names.includes(`${root}npm-shrinkwrap.json`);
-  const scriptName = scripts.dev ? 'dev' : scripts.start ? 'start' : null;
+  const usesPnpm = hasPnpmLock || pkg.packageManager?.startsWith('pnpm@');
+  const scriptName = pkg.scripts.dev ? 'dev' : pkg.scripts.start ? 'start' : null;
   if (!scriptName) return invalidProject();
 
-  const serverArgs = /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(scripts[scriptName])
+  const serverArgs = /(?:^|\s)next\s+(?:dev|start)(?:\s|$)/.test(pkg.scripts[scriptName])
     ? ['--hostname', '0.0.0.0']
     : [];
-  if (hasPnpmLock) {
+  if (usesPnpm) {
     return {
-      installCommand: ['corepack', 'pnpm', 'install', '--frozen-lockfile', '--ignore-scripts'],
+      installCommand: hasPnpmLock
+        ? ['corepack', 'pnpm', 'install', '--frozen-lockfile', '--ignore-scripts']
+        : ['corepack', 'pnpm', 'install', '--ignore-scripts'],
       devCommand: ['corepack', 'pnpm', scriptName, ...serverArgs],
     };
   }
@@ -156,7 +158,7 @@ export function prepareRuntimeProject(zip: ExtractedZip): RuntimeProject {
     const pkg = packageManifest(manifest.contents);
     const root = manifest.segments.slice(0, -1).join('/');
     const rootPrefix = root ? `${root}/` : '';
-    const commands = commandsFor(rootPrefix, entries.map((entry) => entry.name), pkg.scripts);
+    const commands = commandsFor(rootPrefix, entries.map((entry) => entry.name), pkg);
 
     return {
       files: buildFileTree(entries),

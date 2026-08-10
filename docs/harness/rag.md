@@ -233,10 +233,45 @@ Applying the fixes is deliberately **not** automated: that is a code edit, and a
 script doing it blind would be guessing. The loop is render → critique → the agent
 edits → render again, until blockers reach zero.
 
+## What the first real run measured
+
+Every step has now run against the live archive at least once. The numbers below
+are from that run, not from tests.
+
+| | |
+|---|---|
+| Ingest | 422/422 projects, 2357 files, 33.8 MB of text, 0 failures, ~13 min |
+| Annotate | 422/422 cards, 0 failures |
+| Embed | 422 cards in 13s (voyage-3, once the free tier's 3 RPM cap was lifted) |
+| Techniques | 422/422 cards mined, 600 techniques, 61 seen in more than one component |
+| Retrieval | the intended component in the top 3 for **25/30** corpus-grounded briefs |
+| Compose | 5-9 slots planned, filled from the index or sent to fresh code with citations |
+| Critique | runs on a live page; needs a model that can see |
+
+Read precision@3 (32%) with care: a brief generated from one page describes *that*
+page, so of three results only one can satisfy it, and ~33% is the ceiling rather
+than a verdict. Judge verdicts also move run to run — treat all of this as
+approximate and never compare two runs by a few points.
+
+Choosing a model, measured on three identical annotate prompts:
+
+| | deepseek-v4-flash | gpt-5.6-luna |
+|---|---|---|
+| latency per card | 31.4s | 10.1s |
+| output tokens | 3624 | 1101 |
+| 422-card pass | ~$0.61 | ~$0.81 |
+| accepts images | no | yes |
+
+DeepSeek is cheaper; luna is three times faster and is the only one of the two
+that can run `critique.mjs` at all. `LLM_PROVIDER=openai LLM_MODEL=gpt-5.6-luna`
+switches; the token-field difference between them is handled automatically.
+
 ## Still missing
 
-- **No pass has been run against the real corpus yet** — the whole chain is verified
-  offline (unit tests + fake endpoints). Step 3's eval gate is what should decide
-  whether the schema survives contact with 400 real sources.
-- **No eval for the composer or the critique** — retrieval has a top-3 hit-rate gate;
-  selection and critique quality have no equivalent measurement yet.
+- **No eval for the composer or the critique.** Retrieval is measured; whether a
+  composition is *good*, and whether a critique's findings are *right*, is not.
+- **The corpus goes stale.** `data/index.json` grows with the daily sync — a
+  critique run caught the gallery reporting 430 projects against a 422-card
+  corpus. Re-run the ingest to catch up; it resumes and skips what it has.
+- **Nothing writes code yet.** `BUILD.md` is a set of decisions; assembling and
+  merging the components is still a job for the agent reading it.

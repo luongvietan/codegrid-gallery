@@ -36,6 +36,7 @@ function parseArgs(argv) {
     else if (a === '--out') o.out = path.resolve(argv[++i]);
     else if (a === '--exclude-lib') o.filters.excludeAnimLibs = [...(o.filters.excludeAnimLibs || []), ...argv[++i].split(',')];
     else if (a === '--aesthetic') o.filters.aesthetic = argv[++i].split(',');
+    else if (a === '--mood') o.filters.colorMood = argv[++i];
     else o.terms.push(a);
   }
   return o;

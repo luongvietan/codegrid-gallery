@@ -47,7 +47,7 @@ function parseArgs(argv) {
 
 const toUrl = (target) => (/^https?:\/\//i.test(target) ? target : pathToFileURL(path.resolve(target)).href);
 
-async function capture(url, outDir, prescroll) {
+async function capture(url, outDir, prescroll, presentSlots = []) {
   let chromium;
   try { ({ chromium } = await import('playwright')); }
   catch {
@@ -75,6 +75,14 @@ async function capture(url, outDir, prescroll) {
           window.scrollTo(0, 0);
           await new Promise((r) => setTimeout(r, 600));
         });
+      }
+
+      // Ground truth for what is on screen. The plan lists slots that were
+      // PLANNED; assembly may have dropped some (a React pick needs a build step),
+      // and a model told a slot exists will find findings to hang on it — the
+      // first run blamed four faults on a fullscreen menu that was never in the page.
+      for (const s of await page.evaluate(() => [...document.querySelectorAll('[data-slot]')].map((el) => el.dataset.slot))) {
+        if (!presentSlots.includes(s)) presentSlots.push(s);
       }
 
       const docHeight = await page.evaluate(() => document.documentElement.scrollHeight);
@@ -138,7 +146,10 @@ async function main() {
     shots = opts.shots.map((file) => ({ label: path.basename(file, path.extname(file)), file }));
   } else {
     console.log(`Rendering ${opts.target} at ${Object.keys(VIEWPORTS).join(' + ')}...`);
-    shots = await capture(toUrl(opts.target), outDir, opts.prescroll);
+    const seen = [];
+    shots = await capture(toUrl(opts.target), outDir, opts.prescroll, seen);
+    // Review against what was rendered, not what was planned.
+    if (seen.length) slotKeys = seen;
   }
   const images = shots.map(({ label, file }) => {
     if (!fs.existsSync(file)) { console.error(`No such screenshot: ${file}`); process.exit(1); }

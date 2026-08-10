@@ -45,6 +45,10 @@ export function applyFilters(card, f = {}) {
   if (f.compType && card.comp_type !== f.compType) return false;
   const overlaps = (arr, list) => Array.isArray(arr) && arr.some((x) => list.includes(x));
   if (f.aesthetic && f.aesthetic.length && !overlaps(card.aesthetic, f.aesthetic)) return false;
+  // color_mood is a hard field for a reason: a brief that says "dark" and an
+  // anchor whose tokens are white produce a page normalized to the wrong palette,
+  // with every other section inverted to match it.
+  if (f.colorMood && card.color_mood !== f.colorMood) return false;
   if (f.excludeSideEffects && f.excludeSideEffects.length && overlaps(card.side_effects, f.excludeSideEffects)) return false;
   if (f.excludeAnimLibs && f.excludeAnimLibs.length && overlaps(card.animation_libs, f.excludeAnimLibs)) return false;
   return true;

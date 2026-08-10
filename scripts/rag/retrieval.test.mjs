@@ -89,3 +89,13 @@ test('topKHitAny accepts any of several equally correct answers', () => {
   assert.equal(topKHitAny(ranked, ['q', 'c'], 2), false);
   assert.equal(topKHitAny(ranked, [null, undefined], 3), false);
 });
+
+test('applyFilters can hold the page to one colour mood', () => {
+  // A "dark editorial" brief that picks a light hero makes it the anchor, and
+  // every other section is then rewritten to the wrong palette.
+  const dark = card('d', { color_mood: 'dark' });
+  const light = card('l', { color_mood: 'light' });
+  assert.equal(applyFilters(dark, { colorMood: 'dark' }), true);
+  assert.equal(applyFilters(light, { colorMood: 'dark' }), false);
+  assert.equal(applyFilters(light, {}), true);
+});

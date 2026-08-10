@@ -148,6 +148,23 @@ export function rewriteTokens(text, rewrite = {}) {
   return out;
 }
 
+/**
+ * Pin a section's fixed elements to the section.
+ *
+ * `position: fixed` is measured against the viewport, not the wrapper, so a nav
+ * that was fixed when its component owned the whole document floats over every
+ * section below it once four components share the page — and the fixed layers of
+ * four different designs pile up in the same corner. Inside a section wrapper
+ * (which buildPage gives `position: relative`), `absolute` means what `fixed`
+ * meant when the component was alone.
+ *
+ * Global-scope components are exempt: a cursor that stops following the viewport
+ * is not a cursor.
+ */
+export function containFixed(css) {
+  return String(css ?? '').replace(/position\s*:\s*fixed/gi, 'position: absolute');
+}
+
 /** Each component's script gets its own scope: two pages both declaring `const
  *  container` at top level would throw on the second one. */
 export function wrapJs(js, slot) {

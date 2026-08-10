@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals,
+  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed,
 } from './assembly.mjs';
 
 // ---------- pulling a page apart ----------
@@ -111,6 +111,14 @@ test('rewriteTokens snaps type sizes to the canonical scale', () => {
   const out = rewriteTokens('h1 { font-size: 15px; } p { font-size: 115px; }', { type_scale_px: { 15: 16 } });
   assert.ok(out.includes('font-size: 16px'));
   assert.ok(out.includes('115px'));          // 115 is not 15
+});
+
+test('containFixed pins a section fixed layer to its section', () => {
+  // A nav that was fixed while its component owned the document floats over
+  // every section below it once four components share the page.
+  assert.equal(containFixed('.nav { position: fixed; top: 0; }'), '.nav { position: absolute; top: 0; }');
+  assert.equal(containFixed('.a{position:FIXED}'), '.a{position: absolute}');
+  assert.equal(containFixed('.b { position: sticky; }'), '.b { position: sticky; }');
 });
 
 // ---------- assembly ----------

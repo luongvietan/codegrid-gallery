@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, buildPage,
+  scopeCss, rewriteTokens, buildPage, containFixed,
 } from './assembly.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -102,7 +102,9 @@ async function main() {
     sections.push({
       slot: pick.slot,
       html: rewriteTokens(extractBodyInner(html), rewrite),
-      css: scopeCss(rewriteTokens(local.css, rewrite), scope),
+      // Global components (a cursor, a smooth-scroll driver) keep their fixed
+      // layers; a section's must be pinned to the section.
+      css: scopeCss(card.scope === 'global' ? rewriteTokens(local.css, rewrite) : containFixed(rewriteTokens(local.css, rewrite)), scope),
       js: local.js,
     });
     console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js`);

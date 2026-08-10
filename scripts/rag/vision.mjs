@@ -20,6 +20,28 @@ export const VIEWPORTS = {
   mobile: { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
 };
 
+/**
+ * Where to stop and shoot, instead of one full-page image.
+ *
+ * The first real run captured a virtualized gallery with `fullPage: true` and got
+ * a 1440x37495 strip: the list renders only a window of cards around the current
+ * scroll offset, so everything else photographed as empty boxes, and the model
+ * dutifully reported "hundreds of empty rectangles" as a blocker. Two failures in
+ * one image — it showed state that never exists on screen at once, and at 1:26 it
+ * is illegible to a vision model after downscaling.
+ *
+ * Viewport-sized frames at a few offsets show what a person actually sees.
+ */
+export function captureStops(docHeight, viewportHeight, maxShots = 3) {
+  if (!(docHeight > 0) || !(viewportHeight > 0)) return [0];
+  const maxScroll = Math.max(0, docHeight - viewportHeight);
+  if (maxScroll === 0) return [0];
+  const n = Math.min(maxShots, Math.max(2, Math.ceil(docHeight / viewportHeight)));
+  const stops = [];
+  for (let i = 0; i < n; i++) stops.push(Math.round((maxScroll * i) / (n - 1)));
+  return [...new Set(stops)];
+}
+
 export const CRITIQUE_ENUMS = {
   verdict: ['ship', 'revise', 'reject'],
   severity: ['blocker', 'major', 'minor'],

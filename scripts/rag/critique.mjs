@@ -25,7 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
 import {
   VIEWPORTS, validateCritique, visionPayload, buildCritiquePrompt,
-  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure,
+  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure, captureStops,
 } from './vision.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -76,9 +76,18 @@ async function capture(url, outDir, prescroll) {
           await new Promise((r) => setTimeout(r, 600));
         });
       }
-      const file = path.join(shotsDir, `${label}.png`);
-      await page.screenshot({ path: file, fullPage: true });
-      out.push({ label, file });
+
+      const docHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+      const stops = captureStops(docHeight, viewport.height);
+      for (let i = 0; i < stops.length; i++) {
+        await page.evaluate((y) => window.scrollTo(0, y), stops[i]);
+        // Let lazy content for THIS window materialize before shooting it.
+        await page.waitForTimeout(700);
+        const name = stops.length === 1 ? label : `${label}-${i + 1}of${stops.length}`;
+        const file = path.join(shotsDir, `${name}.png`);
+        await page.screenshot({ path: file });   // viewport, not fullPage
+        out.push({ label: name, file });
+      }
       await context.close();
     }
   } finally { await browser.close(); }

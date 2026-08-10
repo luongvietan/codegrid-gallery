@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   VIEWPORTS, validateCritique, visionPayload, buildCritiquePrompt,
-  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure,
+  mergeFindings, sortFindings, buildFixPlan, explainVisionFailure, captureStops,
 } from './vision.mjs';
 
 const finding = (over = {}) => ({
@@ -74,6 +74,25 @@ test('visionPayload builds OpenAI-compatible data URIs', () => {
   const [msg] = visionPayload('openai', 'what is wrong?', images);
   assert.deepEqual(msg.content[1], { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } });
   assert.equal(msg.content.at(-1).type, 'text');
+});
+
+test('captureStops frames what a person sees, not a 37000px strip', () => {
+  // A short page needs one frame.
+  assert.deepEqual(captureStops(700, 900), [0]);
+  assert.deepEqual(captureStops(900, 900), [0]);
+
+  // Two screens: top and bottom.
+  assert.deepEqual(captureStops(1800, 900), [0, 900]);
+
+  // The real case: a virtualized gallery 37495px tall. Three legible frames
+  // beat one unreadable strip full of card containers that never materialized.
+  const stops = captureStops(37495, 900, 3);
+  assert.equal(stops.length, 3);
+  assert.equal(stops[0], 0);
+  assert.equal(stops.at(-1), 37495 - 900);
+  assert.ok(stops[1] > stops[0] && stops[1] < stops[2]);
+
+  assert.deepEqual(captureStops(0, 900), [0]);   // degenerate input is survivable
 });
 
 test('VIEWPORTS covers a desktop and a real mobile viewport', () => {

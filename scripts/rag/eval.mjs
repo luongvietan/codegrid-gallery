@@ -13,14 +13,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { embedBatch, embedConfig } from './provider.mjs';
 import { rankLocal, topKHitAny } from './retrieval.mjs';
+import { resolveLlm, createChat } from './llm.mjs';
+import { judgeBrief, precisionAt, summarize } from './judge.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 function parseArgs(argv) {
-  const o = { corpus: path.join(ROOT, 'corpus'), briefs: path.join(ROOT, 'docs/harness/eval-briefs.sample.json'), k: 3 };
+  const o = { corpus: path.join(ROOT, 'corpus'), briefs: path.join(ROOT, 'docs/harness/eval-briefs.sample.json'), k: 3, judge: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
+    if (a === '--judge') o.judge = true;
+    else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
     else if (a === '--k') o.k = Math.max(1, +argv[++i] || 3);
     else if (!a.startsWith('--')) o.briefs = path.resolve(a);
     else { console.error(`Unknown argument: ${a}`); process.exit(2); }
@@ -48,6 +51,13 @@ async function main() {
 
   const qvecs = await embedBatch(briefs.map((b) => b.query));
   let hits = 0;
+  const judged = [];
+  let chat = null;
+  if (opts.judge) {
+    const llm = resolveLlm();
+    chat = await createChat(llm);
+    console.log(`Judging relevance with ${llm.provider}:${llm.model}`);
+  }
   console.log(`Eval: ${briefs.length} briefs over ${cards.length} cards, top-${opts.k}\n`);
   for (let i = 0; i < briefs.length; i++) {
     const b = briefs[i];
@@ -59,9 +69,22 @@ async function main() {
     const mark = hit === null ? '—' : hit ? '✓' : '✗';
     const top = ranked.slice(0, opts.k).map((r) => `${r.card.id}(${r.sim.toFixed(2)})`).join(', ');
     console.log(`${mark} "${b.query}"${want ? ` [want ${want.join(' | ')}]` : ''}\n    top${opts.k}: ${top || '(none passed filters)'}`);
+
+    if (chat) {
+      const top3 = ranked.slice(0, opts.k).map((r) => r.card);
+      const verdicts = top3.length ? await judgeBrief(chat, b.query, top3) : [];
+      judged.push({ query: b.query, verdicts });
+      for (const v of verdicts) console.log(`      ${v.relevant ? 'usable ' : 'NOT    '} ${v.id.slice(0, 46)} — ${v.why}`);
+      console.log(`      precision@${opts.k}: ${(100 * precisionAt(verdicts)).toFixed(0)}%`);
+    }
   }
   const scored = briefs.filter((b) => b.expect_ids || b.expect_id).length;
-  if (scored) console.log(`\nHit@${opts.k}: ${hits}/${scored} (${(100 * hits / scored).toFixed(0)}%)`);
+  if (scored) console.log(`\nHit@${opts.k}: ${hits}/${scored} (${(100 * hits / scored).toFixed(0)}%) — agreement with the expected ids`);
+  if (judged.length) {
+    const s = summarize(judged);
+    console.log(`Precision@${opts.k}: ${(100 * s.meanPrecision).toFixed(0)}% of returned results are usable`);
+    console.log(`Usable result for ${s.anyRelevant}/${s.briefs} briefs — ${s.shutouts} shutout(s), the failure that actually blocks a composer`);
+  }
   console.log('If two cards come back near-identical -> schema lacks discriminating power (tighten description part (a)).');
   console.log('If the right card misses -> probes use code vocabulary, not brief vocabulary (fix annotator rule 3).');
 }

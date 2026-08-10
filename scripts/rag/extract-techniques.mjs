@@ -23,11 +23,12 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const MAX_KNOWN_NAMES = 60; // keep the prompt bounded once the vocabulary is large
 
 function parseArgs(argv) {
-  const o = { corpus: path.join(ROOT, 'corpus'), limit: 0, force: false };
+  const o = { corpus: path.join(ROOT, 'corpus'), limit: 0, force: false, concurrency: 1 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--force') o.force = true;
     else if (a === '--limit') o.limit = Math.max(0, +argv[++i] || 0);
+    else if (a === '--concurrency') o.concurrency = Math.max(1, +argv[++i] || 1);
     else if (a === '--corpus') o.corpus = path.resolve(argv[++i]);
     else { console.error(`Unknown argument: ${a}`); process.exit(2); }
   }
@@ -68,20 +69,30 @@ async function main() {
   if (!files.length) { console.log('Nothing to do (all cards already mined — use --force to redo).'); return; }
 
   let n = 0, failed = 0;
-  for (const f of files) {
-    const card = JSON.parse(fs.readFileSync(path.join(cardsDir, f), 'utf8'));
-    n++;
-    try {
-      const known = knownNamesOf(registry).slice(0, MAX_KNOWN_NAMES);
-      const techniques = await extractTechniques(chat, card, known);
-      addToRegistry(registry, card.id, techniques);
-      fs.writeFileSync(outFile, JSON.stringify(registry, null, 2)); // checkpoint every card: resumable
-      console.log(`[${n}/${files.length}] ${card.id} · ${techniques.map((t) => t.id.replace(/^tech_/, '')).join(', ')}`);
-    } catch (e) {
-      failed++;
-      console.error(`[${n}/${files.length}] ${card.id} · FAILED: ${e.message}`);
+  const queue = [...files];
+  // Concurrency is opt-in and costs a little convergence: workers running at the
+  // same moment cannot see each other's new names, so N calls in flight may coin
+  // N names for one technique. With N small against a corpus of hundreds that is
+  // a handful of near-duplicates against hours saved — the vocabulary each worker
+  // reads is still the shared registry, updated after every completion.
+  async function worker() {
+    while (queue.length) {
+      const f = queue.shift();
+      const card = JSON.parse(fs.readFileSync(path.join(cardsDir, f), 'utf8'));
+      n++;
+      try {
+        const known = knownNamesOf(registry).slice(0, MAX_KNOWN_NAMES);
+        const techniques = await extractTechniques(chat, card, known);
+        addToRegistry(registry, card.id, techniques);
+        fs.writeFileSync(outFile, JSON.stringify(registry, null, 2)); // checkpoint every card: resumable
+        console.log(`[${n}/${files.length}] ${card.id} · ${techniques.map((t) => t.id.replace(/^tech_/, '')).join(', ')}`);
+      } catch (e) {
+        failed++;
+        console.error(`[${n}/${files.length}] ${card.id} · FAILED: ${e.message}`);
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(opts.concurrency, files.length) }, worker));
 
   const total = Object.keys(registry.techniques).length;
   const reused = Object.values(registry.techniques).filter((t) => (t.sources || 1) > 1).length;

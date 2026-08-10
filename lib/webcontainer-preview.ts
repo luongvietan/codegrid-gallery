@@ -22,6 +22,13 @@ export interface RuntimePreviewSnapshot {
   error: string | null;
 }
 
+export interface RuntimePreviewTimeouts {
+  bootMs: number;
+  installMs: number;
+  startMs: number;
+  serverReadyMs: number;
+}
+
 interface RuntimeContainer {
   mount(files: FileSystemTree): Promise<void>;
   spawn(command: string, args: string[], options?: { cwd?: string }): Promise<WebContainerProcess>;
@@ -46,6 +53,7 @@ interface RunRuntimePreviewOptions {
   onUpdate(snapshot: RuntimePreviewSnapshot): void;
   boot(options: Pick<BootOptions, 'coep'>): Promise<RuntimeContainer>;
   prepare?: (zip: ExtractedZip) => RuntimeProject;
+  timeouts?: Partial<RuntimePreviewTimeouts>;
 }
 
 const PHASE_MESSAGE: Record<Exclude<RuntimePreviewPhase, 'failure'>, string> = {
@@ -58,6 +66,12 @@ const PHASE_MESSAGE: Record<Exclude<RuntimePreviewPhase, 'failure'>, string> = {
 
 const CANCELLED = Symbol('runtime-preview-cancelled');
 const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g');
+const DEFAULT_TIMEOUTS: RuntimePreviewTimeouts = {
+  bootMs: 30_000,
+  installMs: 120_000,
+  startMs: 60_000,
+  serverReadyMs: 60_000,
+};
 let bootQueue: Promise<void> = Promise.resolve();
 
 export function createRuntimeLogBuffer({
@@ -140,25 +154,57 @@ function commandName(command: string, args: string[]): string {
   return [command, args[0]].filter(Boolean).join(' ');
 }
 
+async function withDeadline<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+  onTimeout: () => void,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+      onTimeout();
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export async function runRuntimePreview({
   zip,
   signal,
   onUpdate,
   boot,
   prepare = prepareRuntimeProject,
+  timeouts: timeoutOverrides,
 }: RunRuntimePreviewOptions): Promise<void> {
+  const timeouts = { ...DEFAULT_TIMEOUTS, ...timeoutOverrides };
+  const lifecycle = new AbortController();
   const logs = createRuntimeLogBuffer();
   const readers = new Set<ReadableStreamDefaultReader<string>>();
   const processes = new Set<WebContainerProcess>();
   const unsubscribers = new Set<() => void>();
-  let lease: RuntimeLease | null = null;
+  const leaseState: { current: RuntimeLease | null } = { current: null };
   let phase: RuntimePreviewPhase = 'preparing';
   let url: string | null = null;
   let error: string | null = null;
   let cancelRun = () => {};
   const cancelled = new Promise<never>((_resolve, reject) => {
-    cancelRun = () => reject(CANCELLED);
-    signal.addEventListener('abort', cancelRun, { once: true });
+    cancelRun = () => {
+      lifecycle.abort();
+      reject(CANCELLED);
+    };
+    if (signal.aborted) cancelRun();
+    else signal.addEventListener('abort', cancelRun, { once: true });
+  });
+  const stopped = new Promise<never>((_resolve, reject) => {
+    const stop = () => reject(CANCELLED);
+    if (lifecycle.signal.aborted) stop();
+    else lifecycle.signal.addEventListener('abort', stop, { once: true });
   });
 
   const emit = () => {
@@ -179,72 +225,112 @@ export async function runRuntimePreview({
     const reader = process.output.getReader();
     readers.add(reader);
     try {
-      while (!signal.aborted) {
+      while (!lifecycle.signal.aborted) {
         const result = await reader.read();
         if (result.done) return;
         logs.push(result.value);
         emit();
       }
     } catch (streamError) {
-      if (!signal.aborted) throw streamError;
+      if (!lifecycle.signal.aborted) throw streamError;
     } finally {
       readers.delete(reader);
       reader.releaseLock();
     }
   };
+  const spawnTracked = async (
+    container: RuntimeContainer,
+    command: string,
+    args: string[],
+    workingDirectory: string,
+  ) => {
+    const process = await container.spawn(command, args, { cwd: workingDirectory });
+    if (lifecycle.signal.aborted) {
+      try { process.kill(); } catch {}
+      throw CANCELLED;
+    }
+    processes.add(process);
+    return process;
+  };
 
   emit();
   try {
     const project = prepare(zip);
-    setPhase('booting');
-    lease = await Promise.race([acquireRuntime(boot, signal), cancelled]);
-    if (!lease) return;
-
     let rejectRuntimeError: (reason: unknown) => void = () => {};
     const runtimeError = new Promise<never>((_resolve, reject) => { rejectRuntimeError = reject; });
-    unsubscribers.add(lease.container.on('error', (runtimeFailure) => {
-      rejectRuntimeError(new Error(normalizeRuntimeError(runtimeFailure)));
-    }));
 
-    await Promise.race([lease.container.mount(project.files), runtimeError, cancelled]);
+    setPhase('booting');
+    await withDeadline((async () => {
+      const acquiredLease = await Promise.race([
+        acquireRuntime(boot, lifecycle.signal),
+        cancelled,
+        stopped,
+      ]);
+      if (!acquiredLease) throw CANCELLED;
+      leaseState.current = acquiredLease;
+      unsubscribers.add(acquiredLease.container.on('error', (runtimeFailure) => {
+        rejectRuntimeError(new Error(normalizeRuntimeError(runtimeFailure)));
+      }));
+      await Promise.race([
+        acquiredLease.container.mount(project.files),
+        runtimeError,
+        cancelled,
+        stopped,
+      ]);
+    })(), timeouts.bootMs, 'Runtime boot timed out.', () => lifecycle.abort());
+    const activeLease = leaseState.current;
+    if (!activeLease) throw CANCELLED;
 
     setPhase('installing');
     const [installCommand, ...installArgs] = project.installCommand;
-    const install = await Promise.race([
-      lease.container.spawn(installCommand, installArgs, { cwd: project.workingDirectory }),
-      runtimeError,
-      cancelled,
-    ]);
-    processes.add(install);
-    const installOutput = streamOutput(install).catch((streamError) => {
-      rejectRuntimeError(streamError);
-    });
-    const installExit = await Promise.race([install.exit, runtimeError, cancelled]);
-    await Promise.race([installOutput, runtimeError, cancelled]);
-    if (installExit !== 0) {
-      throw new Error(`${commandName(installCommand, installArgs)} exited with code ${installExit}.`);
-    }
+    await withDeadline((async () => {
+      const install = await Promise.race([
+        spawnTracked(activeLease.container, installCommand, installArgs, project.workingDirectory),
+        runtimeError,
+        cancelled,
+        stopped,
+      ]);
+      const installOutput = streamOutput(install).catch((streamError) => {
+        rejectRuntimeError(streamError);
+      });
+      const installExit = await Promise.race([
+        install.exit,
+        runtimeError,
+        cancelled,
+        stopped,
+      ]);
+      await Promise.race([installOutput, runtimeError, cancelled, stopped]);
+      if (installExit !== 0) {
+        throw new Error(`${commandName(installCommand, installArgs)} exited with code ${installExit}.`);
+      }
+    })(), timeouts.installMs, 'Dependency install timed out.', () => lifecycle.abort());
 
     setPhase('starting');
     let serverReady: (readyUrl: string) => void = () => {};
     const ready = new Promise<string>((resolve) => { serverReady = resolve; });
-    unsubscribers.add(lease.container.on('server-ready', (_port, readyUrl) => serverReady(readyUrl)));
+    unsubscribers.add(activeLease.container.on('server-ready', (_port, readyUrl) => serverReady(readyUrl)));
 
     const [devCommand, ...devArgs] = project.devCommand;
-    const dev = await Promise.race([
-      lease.container.spawn(devCommand, devArgs, { cwd: project.workingDirectory }),
+    const dev = await withDeadline(Promise.race([
+      spawnTracked(activeLease.container, devCommand, devArgs, project.workingDirectory),
       runtimeError,
       cancelled,
-    ]);
-    processes.add(dev);
+      stopped,
+    ]), timeouts.startMs, 'Dev server start timed out.', () => lifecycle.abort());
     void streamOutput(dev).catch((streamError) => rejectRuntimeError(streamError));
     const devExit = dev.exit.then((exitCode) => {
       throw new Error(`${commandName(devCommand, devArgs)} exited with code ${exitCode}.`);
     });
 
-    url = await Promise.race([ready, devExit, runtimeError, cancelled]);
+    url = await withDeadline(Promise.race([
+      ready,
+      devExit,
+      runtimeError,
+      cancelled,
+      stopped,
+    ]), timeouts.serverReadyMs, 'Server readiness timed out.', () => lifecycle.abort());
     setPhase('ready');
-    await Promise.race([devExit, runtimeError, cancelled]);
+    await Promise.race([devExit, runtimeError, cancelled, stopped]);
   } catch (runtimeFailure) {
     if (runtimeFailure !== CANCELLED && !signal.aborted) {
       phase = 'failure';
@@ -253,6 +339,7 @@ export async function runRuntimePreview({
     }
   } finally {
     signal.removeEventListener('abort', cancelRun);
+    lifecycle.abort();
     for (const unsubscribe of unsubscribers) {
       try { unsubscribe(); } catch {}
     }
@@ -260,6 +347,6 @@ export async function runRuntimePreview({
       try { process.kill(); } catch {}
     }
     await Promise.allSettled([...readers].map((reader) => reader.cancel()));
-    lease?.release();
+    leaseState.current?.release();
   }
 }

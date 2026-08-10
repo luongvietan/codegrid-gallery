@@ -168,3 +168,69 @@ the lease for retry.
 node --test lib/webcontainer-preview.test.mjs
 # exit 0 — 6 passed, 0 failed
 ```
+
+## Final review fix — bounded runtime phase deadlines
+
+### RED
+
+Added deterministic lifecycle tests with injected 10 ms limits and a separate
+100 ms test safety guard. The new cases hold each relevant operation unresolved:
+
+- WebContainer boot;
+- install output and process exit;
+- dev process spawn;
+- `server-ready` after a successful dev spawn.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 1 — 6 passed, 4 failed
+```
+
+All four failures reported `settledBeforeGuard` as false, proving the injected
+deadlines were absent and each run continued until external cancellation.
+
+### GREEN and lifecycle design
+
+Added configurable `RuntimePreviewTimeouts` with browser defaults of 30 seconds
+for boot/mount, 120 seconds for install/spawn/output/exit, 60 seconds for dev
+spawn, and 60 seconds for server readiness. Every deadline clears its timer on
+settlement and aborts an internal lifecycle signal only when it actually fires.
+The external component signal remains the authority for stale React updates, so
+a timeout can still publish a normalized failure snapshot and expose the existing
+retry action.
+
+Late async results are handled explicitly: a WebContainer whose boot resolves
+after timeout tears itself down before releasing the singleton slot, and a
+process whose spawn resolves after timeout kills itself instead of entering the
+already-cleaned run. Normal finally cleanup still unsubscribes listeners, kills
+tracked processes, cancels readers, tears down the active container, and releases
+the lease.
+
+```text
+node --test lib/webcontainer-preview.test.mjs
+# exit 0 — 10 passed, 0 failed
+```
+
+The deadline tests assert normalized retryable failures for every phase, install
+retry to ready, tracked process/listener/container cleanup, late boot teardown,
+and late dev-process kill without weakening the existing Strict Mode/singleton
+test.
+
+Final verification with the concurrent ZIP-hardening worktree state also passed:
+
+```text
+npm run test:pipeline
+# exit 0 — 107 passed, 0 failed
+
+npx eslint lib/webcontainer-preview.ts lib/webcontainer-preview.test.mjs components/ProjectModal.tsx components/tabs/RuntimePreviewTab.tsx lib/webcontainer-runtime.ts
+# exit 0
+
+npx tsc --noEmit
+# exit 0
+
+npm run build
+# exit 0
+```
+
+The build retains only the previously documented multiple-lockfile/Turbopack
+root warning.

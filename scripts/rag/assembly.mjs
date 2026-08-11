@@ -256,7 +256,11 @@ ${JSON.stringify(importMap, null, 2)}
 
   const body = sections.map((s) => `<section data-slot="${s.slot}">\n${s.html}\n</section>`).join('\n\n');
   const scripts = [
-    ...externals.js.map((s) => `<script src="${s}"></script>`),
+    // A CDN file that is itself an ES module must say so, or the browser parses
+    // it as a classic script and throws on its first import.
+    ...externals.js.map((s) => (/\.esm\.js(\?|$)|\/esm\//i.test(s)
+      ? `<script type="module" src="${s}"></script>`
+      : `<script src="${s}"></script>`)),
     sections.some((s) => s.js) ? `<script>\n${sections.filter((s) => s.js).map((s) => wrapJs(s.js, s.slot)).join('\n\n')}\n</script>` : '',
     // Bundled React sections get one module each, so a throw while mounting one
     // cannot stop the others — a single shared module would take the page down.

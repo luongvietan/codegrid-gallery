@@ -20,6 +20,7 @@ import { resolveLlm, createChat } from './llm.mjs';
 import { embedBatch, embedConfig } from './provider.mjs';
 import { rankTechniques } from './retrieval.mjs';
 import { generateSection } from './generation.mjs';
+import { directionBrief } from './direction.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const EXCERPT_BYTES = 1800;
@@ -86,6 +87,13 @@ async function main() {
     }
   }
 
+  // The art direction, if one was set. Without it every section is written in
+  // isolation and the page comes out as a list of unrelated good intentions.
+  const dirFile = path.join(opts.dir, 'direction.json');
+  const direction = fs.existsSync(dirFile) ? JSON.parse(fs.readFileSync(dirFile, 'utf8')) : null;
+  if (direction) console.log(`Direction: ${direction.idea}`);
+  else console.log('No direction.json — sections will be written in isolation. Run direct.mjs first.');
+
   const outDir = path.join(opts.dir, 'generated');
   fs.mkdirSync(outDir, { recursive: true });
   const chat = await createChat(resolveLlm());
@@ -100,7 +108,11 @@ async function main() {
     const excerpts = {};
     for (const t of techniques) excerpts[t.id] = excerptFor(opts.corpus, t);
     try {
-      const section = await generateSection(chat, { slot, tokens: plan.tokens || {}, techniques, excerpts });
+      const section = await generateSection(chat, {
+        slot, tokens: plan.tokens || {}, techniques, excerpts,
+        direction: direction ? directionBrief(direction, slot.key) : '',
+        images: direction?.images || [],
+      });
       fs.writeFileSync(out, JSON.stringify({ slot: slot.key, ...section }, null, 2));
       done++;
       console.log(`  ${slot.key.padEnd(12)} ${section.html.length} B html, ${section.css.length} B css, ${section.js.length} B js · ${section.notes}`);

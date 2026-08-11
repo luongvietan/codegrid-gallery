@@ -171,8 +171,6 @@ async function main() {
     const projectDir = path.join(opts.corpus, pick.id);
     const html = fs.readFileSync(path.join(projectDir, entry), 'utf8');
     const ext = extractExternals(html);
-    externalCss.push(ext.css);
-    externalJs.push(ext.js);
 
     const local = inlineLocalAssets(html, projectDir, entry);
     if (isEsModule(local.js)) bareImportsOf(local.js).forEach((b) => bareSpecs.push(b));
@@ -207,8 +205,17 @@ async function main() {
       // and kills the section without touching the rest of the page.
       ...(isEsModule(local.js) ? { module: local.js } : { js: local.js }),
       origin: 'reused',
+      externals: ext,
     });
     console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js, ${copied} image(s)`);
+  }
+
+  // The page's shared images, referenced by the written sections as assets/page/*.
+  const pageAssets = path.join(opts.dir, 'page-assets');
+  if (fs.existsSync(pageAssets)) {
+    const dest = path.join(outDirFor(opts), 'assets', 'page');
+    fs.mkdirSync(dest, { recursive: true });
+    for (const f of fs.readdirSync(pageAssets)) fs.copyFileSync(path.join(pageAssets, f), path.join(dest, f));
   }
 
   // Sections written by generate.mjs, in the page's own design language rather
@@ -232,6 +239,18 @@ async function main() {
   const sections = [...bySlot.values()].sort((a, b) => order.indexOf(a.slot) - order.indexOf(b.slot));
 
   if (!sections.length) { console.error('Nothing assembled — every pick was skipped.'); process.exit(1); }
+
+  // Externals belong to the sections that SURVIVED. A generated section replacing
+  // a pick used to leave the pick's CDN tags behind — including an ES module
+  // loaded as a classic script, which threw on every page load.
+  for (const sec of sections) {
+    if (sec.externals) { externalCss.push(sec.externals.css); externalJs.push(sec.externals.js); }
+  }
+  // Written sections are told to assume GSAP is already on the page, so it has to be.
+  if (sections.some((s) => s.origin === 'written')) {
+    externalJs.push(['https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js']);
+  }
 
   const outDir = outDirFor(opts, plan);
   fs.mkdirSync(outDir, { recursive: true });

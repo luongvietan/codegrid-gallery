@@ -79,3 +79,12 @@ test('generateSection gives up loudly rather than returning something invalid', 
   const chat = async () => JSON.stringify(section({ html: '<body>x</body>' }));
   await assert.rejects(() => generateSection(chat, spec), /section generation failed/);
 });
+
+test('validateSection rejects a static import, not just a dynamic one', () => {
+  // Caught in the browser: a generated section used `import gsap from "gsap"`,
+  // threw "Cannot use import statement outside a module", and died silently.
+  assert.equal(validateSection(section({ js: 'import gsap from "gsap";\ngsap.to(1)' }), 'p').ok, false);
+  assert.equal(validateSection(section({ js: 'import "./a.css"' }), 'p').ok, false);
+  assert.equal(validateSection(section({ js: 'export const a = 1' }), 'p').ok, false);
+  assert.equal(validateSection(section({ js: 'gsap.to(".x", { y: 0 })' }), 'p').ok, true);
+});

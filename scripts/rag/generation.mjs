@@ -20,7 +20,7 @@ export const SECTION_FIELDS = ['html', 'css', 'js', 'notes'];
 
 const MAX_EXCERPT = 1800;
 
-export function buildSectionPrompt({ slot, tokens = {}, techniques = [], excerpts = {} }) {
+export function buildSectionPrompt({ slot, tokens = {}, techniques = [], excerpts = {}, direction = '', images = [] }) {
   const t = tokens.colors || {};
   const fonts = (tokens.fonts || []).map((f) => `${f.family}${f.role ? ` (${f.role})` : ''}`).join(', ') || 'unspecified';
   const scale = (tokens.type_scale_px || []).join(', ') || 'unspecified';
@@ -30,7 +30,18 @@ export function buildSectionPrompt({ slot, tokens = {}, techniques = [], excerpt
     return `${i + 1}. ${x.name || x.id} — ${x.mechanism}\n   parameters seen in the corpus: ${JSON.stringify(x.params || {})}${src}`;
   }).join('\n\n');
 
-  return `Write ONE section of a web page. Return ONLY one JSON object with keys: ${SECTION_FIELDS.join(', ')}.
+  const art = direction ? `
+ART DIRECTION — the page was directed before any section was written. Obey it; it is not a suggestion:
+${direction}
+` : '';
+  const pics = images.length
+    ? `
+REAL IMAGES available to this page. Use them with <img src="..."> — they exist on disk. Do NOT invent other paths:
+${images.map((i) => `- ${i}`).join('\n')}
+`
+    : '';
+
+  return `Write ONE section of a web page. Return ONLY one JSON object with keys: ${SECTION_FIELDS.join(', ')}.${art}${pics}
 
 SECTION: ${slot.key} (${slot.comp_type})
 WHAT IT SHOULD BE: ${slot.intent}
@@ -50,7 +61,7 @@ RULES:
 3. "js": plain JavaScript, or "" if the section needs none. It runs after the DOM exists, wrapped in its own scope. Use only what the techniques above show; if a technique needs GSAP, assume \`gsap\` is already on the page — do NOT add a script tag or an import.
 4. Use the page's colours, fonts and spacing above. Do not introduce a different palette or a second display face.
 5. Real, plausible copy — this is a portfolio-grade page, not lorem ipsum. Keep headlines short enough not to wrap awkwardly.
-6. No external URLs: no CDN links, no remote images. If you need an image, draw a placeholder with CSS or inline SVG.
+6. No external URLs and no CDN links. For imagery use the real files listed above; only if none are listed may you draw a placeholder with CSS or inline SVG.
 7. "notes": one line on what you built and which technique you used.`;
 }
 
@@ -86,7 +97,19 @@ export function validateSection(section, slotKey) {
   if (/@import/i.test(css)) errors.push('css: @import is not allowed — no external resources');
   if (/url\(\s*["']?https?:/i.test(css)) errors.push('css: remote url() is not allowed — draw placeholders with CSS or inline SVG');
   if (/https?:\/\//i.test(html)) errors.push('html: remote URLs are not allowed');
-  if (/\b(import|require)\s*\(/.test(String(section.js ?? ''))) errors.push('js: must not import anything — assume libraries are already on the page');
+  for (const m of html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) {
+    if (!/^assets\//.test(m[1])) errors.push(`html: <img src="${m[1]}"> — only the listed assets/ files exist`);
+  }
+  // Static `import x from "y"` as well as dynamic import(): a generated section
+  // runs inside a plain <script>, so a static import throws "Cannot use import
+  // statement outside a module" and kills that section while the page renders on.
+  const sectionJs = String(section.js ?? '');
+  if (/\b(import|require)\s*\(/.test(sectionJs)
+    || /^\s*import\s+[\s\S]*?from\s/m.test(sectionJs)
+    || /^\s*import\s*["']/m.test(sectionJs)
+    || /^\s*export\s/m.test(sectionJs)) {
+    errors.push('js: no import or export — the section runs in a plain script and the libraries it needs are already on the page');
+  }
 
   if (slotKey && errors.length === 0 && !html.trim()) errors.push(`html: nothing generated for slot "${slotKey}"`);
   return { ok: errors.length === 0, errors };

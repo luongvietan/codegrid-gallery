@@ -7,6 +7,11 @@ import path from 'node:path';
 // Windows). The cost is that a new test file is simply never run — assembly's 15
 // tests sat unwired long enough for a syntax error in one of them to go unseen.
 // This test is the thing that notices.
+//
+// It checks EVERY npm script, not just `test`, because not every test belongs in
+// the hermetic suite: assets-proxy.test.mjs fetches a running dev server, so it
+// lives in `test:integration`. Forcing it into `npm test` made the suite hang for
+// three minutes against a port that was not listening.
 test('every *.test.mjs file is wired into an npm script', () => {
   const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const listed = new Set(

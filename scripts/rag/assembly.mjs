@@ -225,13 +225,65 @@ export function bareImportsOf(js) {
   return [...new Set(out)];
 }
 
+/**
+ * Run after every section's script.
+ *
+ * The composer has printed this instruction in every BUILD.md since the first
+ * version — "call ScrollTrigger.refresh() after every section is in the DOM" —
+ * and nothing ever did it. Each section registers triggers against positions that
+ * later sections and loading images then move, so the triggers point at the wrong
+ * offsets and their reveals never fire: 145 elements sat at opacity 0 on a page
+ * that looked, correctly, broken.
+ *
+ * The fail-safe is deliberate too. An element still invisible seconds after load,
+ * inside a section already on screen, is a bug and not an intention; the page
+ * shows it rather than shipping a blank screen.
+ */
+export function bootstrapScript() {
+  return `
+(function () {
+  function refresh() { if (window.ScrollTrigger) window.ScrollTrigger.refresh(); }
+  window.addEventListener('load', refresh);
+  document.querySelectorAll('img').forEach(function (i) {
+    if (!i.complete) i.addEventListener('load', refresh, { once: true });
+  });
+  setTimeout(refresh, 800);
+
+  // Nothing may stay invisible forever.
+  setTimeout(function () {
+    document.querySelectorAll('[data-slot] *').forEach(function (el) {
+      var s = getComputedStyle(el), r = el.getBoundingClientRect();
+      var offscreen = r.bottom < 0 || r.top > innerHeight * 2;
+      if (offscreen || r.height < 4) return;
+      // No regex here on purpose: escaping one through a template literal is how
+      // this fail-safe shipped broken the first time, throwing before it ran.
+      var clip = s.clipPath || '';
+      var invisible = parseFloat(s.opacity) === 0
+        || (clip.indexOf('inset(') === 0 && clip.indexOf('100%') !== -1);
+      if (invisible) { el.style.opacity = '1'; el.style.clipPath = 'none'; el.style.visibility = 'visible'; }
+    });
+  }, 3500);
+})();`;
+}
+
 /** Each component's script gets its own scope: two pages both declaring `const
  *  container` at top level would throw on the second one. */
 export function wrapJs(js, slot) {
   return `/* ${slot} */\n(function () {\n${String(js ?? '').trim()}\n})();`;
 }
 
-export function buildPage({ title = 'Composed page', tokens = {}, externals = { css: [], js: [] }, sections = [], importMap = null }) {
+/** A Google Fonts href for the families the direction chose. Without this the
+ *  page falls back to a system sans and the type pairing is fiction — which is
+ *  exactly what happened: a direction naming Space Grotesk rendered in Helvetica. */
+export function fontHref(families = []) {
+  const list = [...new Set(families.map((f) => String(f || '').split(',')[0].trim().replace(/["']/g, '')))]
+    .filter((f) => f && !/^(ui-|system-ui|sans-serif|serif|monospace|-apple-system)/i.test(f));
+  if (!list.length) return null;
+  const spec = list.map((f) => `family=${encodeURIComponent(f).replace(/%20/g, '+')}:wght@300;400;500;700;800`).join('&');
+  return `https://fonts.googleapis.com/css2?${spec}&display=swap`;
+}
+
+export function buildPage({ title = 'Composed page', tokens = {}, externals = { css: [], js: [] }, sections = [], importMap = null, fonts = [] }) {
   const colors = tokens.colors || {};
   const rootVars = [
     colors.bg && `--page-bg: ${colors.bg};`,
@@ -244,6 +296,7 @@ export function buildPage({ title = 'Composed page', tokens = {}, externals = { 
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${title}</title>`,
+    ...(fontHref(fonts) ? [`<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`, `<link rel="stylesheet" href="${fontHref(fonts)}">`] : []),
     ...externals.css.map((h) => `<link rel="stylesheet" href="${h}">`),
     // The import map must precede any module script that uses it, and a document
     // gets exactly one — so every React section's dependencies are merged into it.
@@ -251,10 +304,26 @@ export function buildPage({ title = 'Composed page', tokens = {}, externals = { 
       ? [`<script type="importmap">
 ${JSON.stringify(importMap, null, 2)}
 </script>`] : []),
-    `<style>\n:root { ${rootVars} }\nhtml, body { margin: 0; padding: 0; background: ${colors.bg || '#fff'}; color: ${colors.fg || '#000'}; }\n/* position: the anchor that containFixed's absolutes resolve against.\n   overflow: without it those absolutes contribute no height, so a section's\n   content spills over the sections below it — a work list painted across the\n   contact and menu screens was how that showed up. */\n[data-slot] { position: relative; overflow: hidden; }\n${sections.map((s) => s.css).filter(Boolean).join('\n')}\n</style>`,
+    `<style>\n:root { ${rootVars} }\nhtml, body { margin: 0; padding: 0; background: ${colors.bg || '#fff'}; color: ${colors.fg || '#000'}; }\n/* position: the anchor that containFixed's absolutes resolve against.\n   overflow: without it those absolutes contribute no height, so a section's\n   content spills over the sections below it — a work list painted across the\n   contact and menu screens was how that showed up. */\n[data-slot] { position: relative; overflow: hidden; }
+/* Layers sit above the page instead of lengthening it. Overlays start hidden —
+   a menu that is always open is not a menu. */
+[data-layer] { position: fixed; inset: 0; overflow: visible; }
+[data-layer="global"] { pointer-events: none; z-index: 90; }
+[data-layer="global"] a, [data-layer="global"] button { pointer-events: auto; }
+[data-layer="overlay"] { z-index: 100; }
+[data-slot][hidden] { display: none; }\n${sections.map((s) => s.css).filter(Boolean).join('\n')}\n</style>`,
   ].join('\n  ');
 
-  const body = sections.map((s) => `<section data-slot="${s.slot}">\n${s.html}\n</section>`).join('\n\n');
+  // Scope decides where a section LIVES, not just how it is styled. A menu is an
+  // overlay and a cursor is a layer; laid out in flow they become screens of
+  // chrome pretending to be content — three of the eight screens on the first
+  // art-directed page were a nav list, a preloader and a cursor demo.
+  const inFlow = sections.filter((s) => (s.scope || 'section') === 'section');
+  const layers = sections.filter((s) => (s.scope || 'section') !== 'section');
+  const body = [
+    ...inFlow.map((s) => `<section data-slot="${s.slot}">\n${s.html}\n</section>`),
+    ...layers.map((s) => `<div data-slot="${s.slot}" data-layer="${s.scope}"${s.scope === 'overlay' ? ' hidden' : ''}>\n${s.html}\n</div>`),
+  ].join('\n\n');
   const scripts = [
     // A CDN file that is itself an ES module must say so, or the browser parses
     // it as a classic script and throws on its first import.
@@ -265,6 +334,7 @@ ${JSON.stringify(importMap, null, 2)}
     // Bundled React sections get one module each, so a throw while mounting one
     // cannot stop the others — a single shared module would take the page down.
     ...sections.filter((s) => s.module).map((s) => `<script type="module">\n/* ${s.slot} */\n${s.module}\n</script>`),
+    `<script>${bootstrapScript()}</script>`,
   ].filter(Boolean).join('\n');
 
   return `<!doctype html>

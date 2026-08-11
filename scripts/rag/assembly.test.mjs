@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractBodyInner, extractExternals, dedupeExternals,
-  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed, rewriteAssetPaths, isEsModule, bareImportsOf,
+  scopeCss, rewriteTokens, wrapJs, buildPage, colorLiterals, containFixed, rewriteAssetPaths, isEsModule, bareImportsOf, fontHref,
 } from './assembly.mjs';
 
 // ---------- pulling a page apart ----------
@@ -207,4 +207,45 @@ test('isEsModule spots a script that cannot be wrapped in an IIFE', () => {
 test('bareImportsOf collects only dependencies, for the import map', () => {
   const js = 'import gsap from "gsap";\nimport { x } from "./local.js";\nimport "lenis/dist/lenis.css";';
   assert.deepEqual(bareImportsOf(js), ['gsap', 'lenis/dist/lenis.css']);
+});
+
+test('fontHref asks for the families the direction chose, and skips system stacks', () => {
+  // A direction naming Space Grotesk rendered in Helvetica because nothing ever
+  // loaded it — the whole type pairing was fiction.
+  const href = fontHref(['Space Grotesk', 'ui-sans-serif, system-ui, sans-serif']);
+  assert.match(href, /^https:\/\/fonts\.googleapis\.com\/css2\?/);
+  assert.match(href, /family=Space\+Grotesk/);
+  assert.ok(!/system-ui/.test(href));             // a system stack needs no download
+  assert.equal(fontHref(['system-ui', 'sans-serif']), null);
+  assert.equal(fontHref([]), null);
+});
+
+test('buildPage keeps overlays and layers out of the page flow', () => {
+  // Three of eight screens on the first art-directed page were a nav list, a
+  // preloader and a cursor demo, stacked in flow as if they were content.
+  const html = buildPage({
+    sections: [
+      { slot: 'hero', scope: 'section', html: '<h1>Hi</h1>', css: '' },
+      { slot: 'cursor', scope: 'global', html: '<div class="dot"></div>', css: '' },
+      { slot: 'menu', scope: 'overlay', html: '<nav>links</nav>', css: '' },
+    ],
+  });
+  assert.ok(html.includes('<section data-slot="hero">'));
+  assert.ok(html.includes('data-slot="cursor" data-layer="global"'));
+  assert.ok(html.includes('data-slot="menu" data-layer="overlay"'));
+  assert.match(html, /data-slot="menu"[^>]*hidden/);   // a menu that is always open is not a menu
+  assert.ok(!html.includes('<section data-slot="menu"'));
+  assert.ok(html.includes('[data-layer] { position: fixed'));
+});
+
+test('buildPage refreshes ScrollTrigger after assembly and never leaves a section blank', () => {
+  // The composer printed this instruction in every BUILD.md and nothing did it:
+  // sections register triggers against positions that later sections and loading
+  // images then move, so 145 elements sat at opacity 0 on a page that looked,
+  // correctly, broken.
+  const html = buildPage({ sections: [{ slot: 'hero', scope: 'section', html: '<h1>x</h1>', css: '', js: 'gsap.from(".a",{})' }] });
+  assert.match(html, /ScrollTrigger\.refresh\(\)/);
+  assert.match(html, /addEventListener\('load'/);
+  assert.match(html, /if \(!i\.complete\)/);         // and again once images land
+  assert.match(html, /opacity = '1'/);               // the fail-safe
 });

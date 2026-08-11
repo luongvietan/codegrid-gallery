@@ -20,7 +20,7 @@ export const SECTION_FIELDS = ['html', 'css', 'js', 'notes'];
 
 const MAX_EXCERPT = 1800;
 
-export function buildSectionPrompt({ slot, tokens = {}, techniques = [], excerpts = {}, direction = '', images = [] }) {
+export function buildSectionPrompt({ slot, tokens = {}, techniques = [], excerpts = {}, direction = '', images = [], fontFamilies = [] }) {
   const t = tokens.colors || {};
   const fonts = (tokens.fonts || []).map((f) => `${f.family}${f.role ? ` (${f.role})` : ''}`).join(', ') || 'unspecified';
   const scale = (tokens.type_scale_px || []).join(', ') || 'unspecified';
@@ -59,15 +59,18 @@ RULES:
 1. "html": the section's inner markup only. NO <html>, <head>, <body> or <section> wrapper — it is inserted into one. No <style> or <script> tags.
 2. "css": plain CSS for this section only. Every selector must be a class or element INSIDE the section. Never style html, body or :root — the section does not own the document.
 3. "js": plain JavaScript, or "" if the section needs none. It runs after the DOM exists, wrapped in its own scope. Use only what the techniques above show; if a technique needs GSAP, assume \`gsap\` is already on the page — do NOT add a script tag or an import.
-4. Use the page's colours, fonts and spacing above. Do not introduce a different palette or a second display face.
-5. Real, plausible copy — this is a portfolio-grade page, not lorem ipsum. Keep headlines short enough not to wrap awkwardly.
+4. Use the page's colours, fonts and spacing above. Do NOT name any font-family the direction did not choose — an invented family falls back to the system sans and the page's typography stops existing.
+4b. HEIGHT BUDGET, from this section's rhythm entry: "full" means one viewport (100vh / min-height:100svh); "tall" means two to three viewports of REAL CONTENT, not padding; "auto" is the content's own height. Do not pad to fill and do not starve: a "tall" section with one headline and two images is as wrong as one three times its budget. If images are listed above, a dense section should use several of them.
+5. Real, plausible copy — this is a portfolio-grade page, not lorem ipsum. Keep headlines short enough not to wrap awkwardly. A section carrying the page needs enough substance to earn its height: several items, captions, an index — not one line and a lot of air.
 6. No external URLs and no CDN links. For imagery use the real files listed above; only if none are listed may you draw a placeholder with CSS or inline SVG.
 7. "notes": one line on what you built and which technique you used.`;
 }
 
 // A generated section that styles the document, or drags in a CDN, defeats the
 // point: the page would be back to fighting over globals.
-export function validateSection(section, slotKey) {
+const GENERIC_FAMILIES = /^(inherit|initial|unset|serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-sans-serif|ui-serif|ui-monospace|ui-rounded|-apple-system|blinkmacsystemfont|segoe ui|roboto|helvetica neue|helvetica|arial|emoji|math|fangsong)$/i;
+
+export function validateSection(section, slotKey, allowedFonts = []) {
   const errors = [];
   if (section == null || typeof section !== 'object' || Array.isArray(section)) {
     return { ok: false, errors: ['section is not an object'] };
@@ -111,6 +114,20 @@ export function validateSection(section, slotKey) {
     errors.push('js: no import or export — the section runs in a plain script and the libraries it needs are already on the page');
   }
 
+  // Fonts, enforced rather than asked for. A section that names a family the
+  // direction never chose gets the system fallback, and the page's typography
+  // quietly stops existing — which is exactly what happened with the prompt rule
+  // alone: a hero asked for "Monument Extended" and rendered in Helvetica.
+  if (allowedFonts.length) {
+    const allowed = new Set(allowedFonts.flatMap((f) => String(f).split(',')).map((f) => f.trim().replace(/["']/g, '').toLowerCase()));
+    for (const m of css.matchAll(/font-family\s*:\s*([^;}]+)/gi)) {
+      for (const fam of m[1].split(',').map((f) => f.trim().replace(/["']/g, ''))) {
+        if (!fam || GENERIC_FAMILIES.test(fam) || allowed.has(fam.toLowerCase()) || fam.startsWith('var(')) continue;
+        errors.push(`css: font-family "${fam}" is not one the direction chose (${allowedFonts.join(', ')}) — it would fall back to the system sans`);
+      }
+    }
+  }
+
   if (slotKey && errors.length === 0 && !html.trim()) errors.push(`html: nothing generated for slot "${slotKey}"`);
   return { ok: errors.length === 0, errors };
 }
@@ -128,7 +145,7 @@ export async function generateSection(chat, spec, attempts = 3) {
       messages.push({ role: 'assistant', content: text }, { role: 'user', content: `That was not valid JSON (${e.message}). Return ONLY the JSON object.` });
       continue;
     }
-    const { ok, errors } = validateSection(section, spec.slot?.key);
+    const { ok, errors } = validateSection(section, spec.slot?.key, spec.fontFamilies || []);
     if (ok) return { html: section.html, css: section.css || '', js: section.js || '', notes: section.notes || '' };
     lastErr = errors.join('; ');
     messages.push({ role: 'assistant', content: text }, { role: 'user', content: `Fix ONLY these and return the full corrected JSON:\n- ${errors.join('\n- ')}` });

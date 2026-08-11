@@ -153,6 +153,7 @@ async function main() {
           css: scopeCss(containFixed(rewriteTokens(built.css, rewrite)), scope),
           module: built.js,
           origin: 'reused',
+          scope: card.scope,
         });
         console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 40)} · react bundle ${Math.round(built.js.length / 1024)} KB, ${built.bare.length} dep(s)`);
       } catch (e) {
@@ -205,6 +206,7 @@ async function main() {
       // and kills the section without touching the rest of the page.
       ...(isEsModule(local.js) ? { module: local.js } : { js: local.js }),
       origin: 'reused',
+      scope: card.scope,
       externals: ext,
     });
     console.log(`  ${pick.slot.padEnd(12)} ${pick.id.slice(0, 46)} · ${local.css.length} B css, ${local.js.length} B js, ${copied} image(s)`);
@@ -225,7 +227,8 @@ async function main() {
     for (const f of fs.readdirSync(genDir).filter((x) => x.endsWith('.json'))) {
       const g = JSON.parse(fs.readFileSync(path.join(genDir, f), 'utf8'));
       const scope = `[data-slot="${g.slot}"]`;
-      bySlot.set(g.slot, { slot: g.slot, html: g.html, css: scopeCss(g.css || '', scope), js: g.js || '', origin: 'written' });
+      const slotSpec = (plan.plan?.slots || []).find((x) => x.key === g.slot);
+      bySlot.set(g.slot, { slot: g.slot, html: g.html, css: scopeCss(g.css || '', scope), js: g.js || '', origin: 'written', scope: slotSpec?.scope || 'section' });
       console.log(`  ${g.slot.padEnd(12)} (written) · ${(g.css || '').length} B css, ${(g.js || '').length} B js`);
     }
   }
@@ -254,7 +257,10 @@ async function main() {
 
   const outDir = outDirFor(opts, plan);
   fs.mkdirSync(outDir, { recursive: true });
+  const dirFile = path.join(opts.dir, 'direction.json');
+  const direction = fs.existsSync(dirFile) ? JSON.parse(fs.readFileSync(dirFile, 'utf8')) : null;
   const page = buildPage({
+    fonts: direction ? [direction.type?.display?.family, direction.type?.body?.family] : [],
     title: plan.plan?.title || 'Composed page',
     tokens: plan.tokens || {},
     externals: { css: dedupeExternals(externalCss), js: dedupeExternals(externalJs) },

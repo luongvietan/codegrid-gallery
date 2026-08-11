@@ -88,3 +88,17 @@ test('validateSection rejects a static import, not just a dynamic one', () => {
   assert.equal(validateSection(section({ js: 'export const a = 1' }), 'p').ok, false);
   assert.equal(validateSection(section({ js: 'gsap.to(".x", { y: 0 })' }), 'p').ok, true);
 });
+
+test('validateSection rejects a font the direction never chose', () => {
+  // The prompt already said not to; it happened anyway. A section asked for
+  // "Monument Extended", nothing loaded it, and the page rendered in Helvetica.
+  const allowed = ['Space Grotesk', 'ui-sans-serif, system-ui, sans-serif'];
+  const bad = validateSection(section({ css: '.t { font-family: "Monument Extended", sans-serif; }' }), 'p', allowed);
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some((e) => /Monument Extended.*not one the direction chose/.test(e)));
+
+  assert.equal(validateSection(section({ css: '.t { font-family: "Space Grotesk", sans-serif; }' }), 'p', allowed).ok, true);
+  assert.equal(validateSection(section({ css: '.t { font-family: system-ui, sans-serif; }' }), 'p', allowed).ok, true);
+  // With no direction there is nothing to enforce.
+  assert.equal(validateSection(section({ css: '.t { font-family: Whatever; }' }), 'p').ok, true);
+});

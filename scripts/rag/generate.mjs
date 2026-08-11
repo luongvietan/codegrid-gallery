@@ -112,6 +112,7 @@ async function main() {
         slot, tokens: plan.tokens || {}, techniques, excerpts,
         direction: direction ? directionBrief(direction, slot.key) : '',
         images: direction?.images || [],
+        fontFamilies: direction ? [direction.type?.display?.family, direction.type?.body?.family].filter(Boolean) : [],
       });
       fs.writeFileSync(out, JSON.stringify({ slot: slot.key, ...section }, null, 2));
       done++;

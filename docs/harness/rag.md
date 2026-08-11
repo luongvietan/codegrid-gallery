@@ -351,9 +351,28 @@ text against 4/90/839) and still drew fewer findings, which is a genuine win. Th
 agency B page carries *less* (896 chars and one visual against 2011 and fourteen),
 so some of its quiet is simply less surface to criticise.
 
-**So the default stays as it is: reuse above the similarity floor, write below it.**
-The evidence does not support always-generating when a good component exists — the
-earlier single-composition result that suggested it was overfitted to one run.
+That reading was itself an artifact, and supporting React exposed it.
+
+### The tie was an artifact of building fewer sections
+
+Those A builds skipped every React pick — 139 of 430 projects — so "reuse" was
+being judged on a half-built page. With React bundling in place, the same
+compositions rebuild with more sections, and get **worse**:
+
+| brief | A, React skipped | A, React building | B, all written |
+|---|---|---|---|
+| photography | 4 sections — 1, 1 blocker | 6 sections — **3, 2** blockers | 8 sections — 1, 1 blocker |
+| agency | 2 sections — 0, 0 blockers | 4 sections — **2, 1** blockers | 5 sections — 0, 1 blocker |
+
+Reuse did not improve when it got more to work with. It got worse, because each
+additional component brings another finished design onto the page, and the faults
+accumulate. Generation now wins in domain as well as out of it — and the earlier
+tie was reuse being flattered by a page it could only half fill.
+
+**The default still stands** — reuse above the similarity floor, write below it —
+but on weaker grounds than before: it is now a claim about cost and provenance,
+not about the result being better. If the measure is blockers, writing every
+section wins in all four briefs measured.
 
 That experiment also found a real bug. The planner was shown the inventory of the
 **whole** corpus while the query's filters left a tenth of it, so it planned a

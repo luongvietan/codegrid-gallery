@@ -140,6 +140,28 @@ export function planSelection(slots, candidatesBySlot, state = newBudgetState(),
   return { picks, rejected, unfilled, state };
 }
 
+/**
+ * Keep only the N strongest reuses; send the rest to fresh code.
+ *
+ * Measured, not assumed: letting the same composition build more reused sections
+ * made it worse — photography went from 1 blocker at four sections to 3 at six,
+ * agency from 0 at two to 2 at four. Each additional component brings another
+ * finished design onto one page and the faults accumulate, so the number of
+ * transplants is itself a dial. Strongest-first, because a 0.67 match earns its
+ * seat and a 0.51 barely does.
+ */
+export function capReuse(selection, maxReuse) {
+  if (!Number.isFinite(maxReuse) || maxReuse < 0) return selection;
+  const ranked = [...selection.picks].sort((a, b) => (b.sim ?? 0) - (a.sim ?? 0));
+  const keep = new Set(ranked.slice(0, maxReuse).map((p) => p.slot.key));
+  const picks = selection.picks.filter((p) => keep.has(p.slot.key));
+  const demoted = selection.picks.filter((p) => !keep.has(p.slot.key)).map((p) => ({
+    ...p.slot,
+    reason: `reuse capped at ${maxReuse} — ${p.card.id} matched at ${(p.sim ?? 0).toFixed(2)} but a page carries only so many borrowed designs`,
+  }));
+  return { ...selection, picks, unfilled: [...selection.unfilled, ...demoted] };
+}
+
 // ---------- design tokens ----------
 
 const nearest = (value, scale) => scale.reduce((best, c) =>

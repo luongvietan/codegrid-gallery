@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  validatePlan, admit, planSelection, newBudgetState, normalizeTokens, integrationNotes, buildBrief,
+  validatePlan, admit, planSelection, capReuse, newBudgetState, normalizeTokens, integrationNotes, buildBrief,
   inventoryOf, formatInventory,
 } from './composition.mjs';
 
@@ -245,4 +245,26 @@ test('buildBrief carries picks, rewrites, unfilled slots and their techniques', 
   assert.match(md, /src_9/);
   assert.match(md, /work_hijack/);       // rejections are shown, not hidden
   assert.match(md, /scroll_hijack budget spent/);
+});
+
+test('capReuse keeps the strongest matches and sends the rest to fresh code', () => {
+  // The dial exists because the dose-response is measured: the same composition
+  // got worse as it built more reused sections.
+  const sel = {
+    picks: [
+      { slot: { key: 'hero', comp_type: 'hero', intent: 'a' }, card: { id: 'a' }, sim: 0.51 },
+      { slot: { key: 'work', comp_type: 'work_grid', intent: 'b' }, card: { id: 'b' }, sim: 0.67 },
+      { slot: { key: 'menu', comp_type: 'menu', intent: 'c' }, card: { id: 'c' }, sim: 0.60 },
+    ],
+    unfilled: [{ key: 'footer', reason: 'below the floor' }],
+    rejected: [],
+  };
+  const capped = capReuse(sel, 2);
+  assert.deepEqual(capped.picks.map((p) => p.slot.key), ['work', 'menu']);   // strongest two, page order kept
+  assert.deepEqual(capped.unfilled.map((u) => u.key), ['footer', 'hero']);
+  assert.match(capped.unfilled[1].reason, /capped at 2.*0\.51/);
+
+  assert.deepEqual(capReuse(sel, 0).picks, []);
+  assert.equal(capReuse(sel, 9).picks.length, 3);
+  assert.equal(capReuse(sel, undefined).picks.length, 3);   // no cap given, nothing changes
 });

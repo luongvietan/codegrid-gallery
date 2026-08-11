@@ -21,7 +21,7 @@ import { ENUMS } from './schema.mjs';
 import { resolveLlm, createChat, extractJson } from './llm.mjs';
 import { embedBatch, embedConfig } from './provider.mjs';
 import { rankLocal, rankTechniques, applyFilters } from './retrieval.mjs';
-import { validatePlan, planSelection, normalizeTokens, buildBrief, inventoryOf, formatInventory } from './composition.mjs';
+import { validatePlan, planSelection, capReuse, normalizeTokens, buildBrief, inventoryOf, formatInventory } from './composition.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CANDIDATES_PER_SLOT = 8; // deep enough that the budget has a fallback to take
@@ -38,6 +38,7 @@ function parseArgs(argv) {
     else if (a === '--aesthetic') o.filters.aesthetic = argv[++i].split(',');
     else if (a === '--mood') o.filters.colorMood = argv[++i];
     else if (a === '--touch-safe') o.filters.touchSafe = true;
+    else if (a === '--max-reuse') o.maxReuse = Math.max(0, +argv[++i] || 0);
     else o.terms.push(a);
   }
   return o;
@@ -143,7 +144,8 @@ async function main() {
 
   // 0.5 is read off one real run (good picks 0.59-0.67, bad ones 0.45-0.49),
   // not derived from anything — --min-sim 0 restores the old fill-anything behaviour.
-  const selection = planSelection(plan.slots, candidatesBySlot, undefined, opts.minSim);
+  let selection = planSelection(plan.slots, candidatesBySlot, undefined, opts.minSim);
+  if (opts.maxReuse !== undefined) selection = capReuse(selection, opts.maxReuse);
   const tokenPlan = normalizeTokens(selection.picks);
 
   // Unfilled slots are where the technique index earns its keep: nothing fits, so
